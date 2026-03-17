@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 37 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Switch">
+<mask id="path-1-inside-1_3253_3636" fill="white">
+<path d="M0 10C0 6.13401 3.13401 3 7 3H27C30.866 3 34 6.13401 34 10C34 13.866 30.866 17 27 17H7C3.13401 17 0 13.866 0 10Z"/>
+</mask>
+<path d="M0 10C0 6.13401 3.13401 3 7 3H27C30.866 3 34 6.13401 34 10C34 13.866 30.866 17 27 17H7C3.13401 17 0 13.866 0 10Z" fill="var(--fill-0, #B2B2B2)"/>
+<path d="M7 3V4H27V3V2H7V3ZM27 17V16H7V17V18H27V17ZM7 17V16C3.68629 16 1 13.3137 1 10H0H-1C-1 14.4183 2.58172 18 7 18V17ZM34 10H33C33 13.3137 30.3137 16 27 16V17V18C31.4183 18 35 14.4183 35 10H34ZM27 3V4C30.3137 4 33 6.68629 33 10H34H35C35 5.58172 31.4183 2 27 2V3ZM7 3V2C2.58172 2 -1 5.58172 -1 10H0H1C1 6.68629 3.68629 4 7 4V3Z" fill="var(--stroke-0, #BABFCC)" mask="url(#path-1-inside-1_3253_3636)"/>
+<path id="Knob" d="M27 0.5C32.2467 0.5 36.5 4.75329 36.5 10C36.5 15.2467 32.2467 19.5 27 19.5C21.7533 19.5 17.5 15.2467 17.5 10C17.5 4.75329 21.7533 0.5 27 0.5Z" fill="var(--fill-0, #F7F7F7)" stroke="var(--stroke-0, #BABFCC)"/>
+</g>
+</svg>

@@ -1,0 +1,92 @@
+.search {
+  display: flex;
+  gap: var(--sds-size-space-200, 8px);
+  align-items: center;
+  width: 100%;
+  min-width: 100px;
+  padding: var(--nexus/spacing/2, 8px) var(--sds-size-space-400, 16px);
+  border-radius: var(--sds-size-radius-200, 8px);
+  transition: all 0.2s ease;
+}
+
+.search--outlined {
+  background: var(--button/default/enabled/background, #ffffff);
+  border: var(--sds-size-stroke-border, 1px) solid var(--button/default/enabled/stroke, #babfcc);
+}
+
+.search--filled {
+  background: var(--sds-color-background-default-default, #ffffff);
+  border: var(--sds-size-stroke-border, 1px) solid var(--sds-color-border-default-default, #babfcc);
+}
+
+.search--disabled {
+  background: var(--sds-color-background-disabled-default, #f7f7f7);
+  border-color: var(--sds-color-border-disabled-default, #babfcc);
+  cursor: not-allowed;
+}
+
+.search__icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.search__icon {
+  width: 100%;
+  height: 100%;
+  color: var(--button/default/enabled/text, #17191c);
+}
+
+.search--disabled .search__icon {
+  color: var(--sds-color-text-disabled-default, #b2b2b2);
+}
+
+.search__input {
+  flex: 1 0 0;
+  border: none;
+  background: transparent;
+  font-family: var(--sds-typography-body-font-family, 'Inter', sans-serif);
+  font-size: var(--sds-typography-body-size-medium, 16px);
+  font-weight: var(--sds-typography-body-font-weight-regular, 400);
+  line-height: 1.4;
+  color: var(--button/default/enabled/text, #17191c);
+  outline: none;
+  width: 100%;
+  padding: 0;
+}
+
+.search__input::placeholder {
+  color: var(--sds-color-text-default-secondary, #8a909e);
+}
+
+.search--disabled .search__input {
+  color: var(--sds-color-text-disabled-default, #b2b2b2);
+  cursor: not-allowed;
+}
+
+.search__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: var(--button/default/enabled/text, #17191c);
+  transition: color 0.2s ease;
+}
+
+.search__clear:hover {
+  color: var(--sds-color-text-default-secondary, #8a909e);
+}
+
+.search__clear svg {
+  width: 100%;
+  height: 100%;
+}

@@ -1,0 +1,31 @@
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sds-size-space-200, 8px);
+  align-items: flex-start;
+}
+
+.radio-group__label-row {
+  display: flex;
+  gap: var(--sds-size-space-050, 2px);
+  align-items: flex-start;
+  font-family: var(--sds-typography-body-font-family, 'Inter', sans-serif);
+  font-weight: var(--sds-typography-body-font-weight-regular, 400);
+  line-height: 1.4;
+}
+
+.radio-group__required {
+  color: var(--sds-color-text-danger-default, #c61735);
+  font-size: var(--sds-typography-body-size-small, 14px);
+  margin: 0;
+}
+
+.radio-group__title {
+  color: var(--sds-color-text-default-secondary, #8a909e);
+  font-size: var(--sds-typography-body-size-medium, 16px);
+  margin: 0;
+}
+
+.radio-group__options {
+  width: 100%;
+}

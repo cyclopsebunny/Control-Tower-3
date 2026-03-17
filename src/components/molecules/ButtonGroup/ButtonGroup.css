@@ -1,0 +1,32 @@
+.button-group {
+  display: flex;
+  gap: var(--nexus/spacing/content/gap/sm, 8px);
+}
+
+.button-group--align-start {
+  justify-content: flex-start;
+}
+
+.button-group--align-end {
+  justify-content: flex-end;
+}
+
+.button-group--align-center {
+  justify-content: center;
+}
+
+.button-group--align-justify {
+  justify-content: stretch;
+}
+
+.button-group--align-justify .button-group__button {
+  flex: 1 0 0;
+}
+
+.button-group--align-stack {
+  flex-direction: column;
+}
+
+.button-group__button {
+  flex-shrink: 0;
+}

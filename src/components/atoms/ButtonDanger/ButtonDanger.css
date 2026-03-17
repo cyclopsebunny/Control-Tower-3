@@ -1,0 +1,108 @@
+.button-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nexus/spacing/content/gap/md, 16px);
+  border: var(--sds-size-stroke-border, 1px) solid;
+  border-radius: var(--nexus/shape/borderRadius/xs, 8px);
+  font-family: var(--sds-typography-body-font-family, 'Inter', sans-serif);
+  font-weight: var(--sds-typography-body-font-weight-regular, 400);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+  padding: var(--nexus/spacing/2, 8px) var(--nexus/spacing/4, 16px);
+}
+
+.button-danger:focus-visible {
+  outline: 2px solid var(--sds-color-text-danger-default, #c61735);
+  outline-offset: 2px;
+}
+
+/* Sizes */
+.button-danger--size-medium {
+  font-size: var(--sds-typography-body-size-medium, 16px);
+  padding: var(--nexus/spacing/2, 8px) var(--nexus/spacing/4, 16px);
+  min-height: 40px;
+}
+
+.button-danger--size-small {
+  font-size: var(--sds-typography-body-size-small, 14px);
+  padding: var(--nexus/spacing/2, 8px) var(--nexus/spacing/3, 12px);
+  min-height: 30px;
+}
+
+/* Variant: Primary */
+.button-danger--variant-primary {
+  background: var(--button/danger/enabled/background, #fc5863);
+  border-color: var(--button/danger/enabled/stroke, #fc5863);
+  color: var(--button/danger/enabled/text, #ffe9e8);
+}
+
+.button-danger--variant-primary:hover:not(:disabled) {
+  background: var(--button/danger/hover/background, #f32245);
+  border-color: var(--button/danger/hover/stroke, #fc5863);
+  color: var(--button/danger/hover/text, #ffe9e8);
+}
+
+.button-danger--variant-primary:active:not(:disabled) {
+  background: var(--button/danger/pressed/background, #bf3617);
+  border-color: var(--button/danger/pressed/stroke, #c61735);
+  color: var(--button/danger/pressed/text, #ffe9e8);
+}
+
+.button-danger--variant-primary:disabled,
+.button-danger--variant-primary.button-danger--state-disabled {
+  background: var(--button/danger/disabled/background, #f7f7f7);
+  border-color: var(--button/danger/disabled/stroke, #babfcc);
+  color: var(--button/danger/disabled/text, #b2b2b2);
+  cursor: not-allowed;
+}
+
+/* Variant: Subtle */
+.button-danger--variant-subtle {
+  background: transparent;
+  border-color: transparent;
+  color: var(--button/danger-subtle/enabled/text, #c61735);
+}
+
+.button-danger--variant-subtle:hover:not(:disabled) {
+  background: var(--button/danger-subtle/hover/background, #ffe9e8);
+  border-color: var(--button/danger-subtle/hover/stroke, #ffe9e8);
+  color: var(--button/danger-subtle/hover/text, #c61735);
+}
+
+.button-danger--variant-subtle:active:not(:disabled) {
+  background: var(--button/danger-subtle/pressed/background, #ffa1a0);
+  border-color: var(--button/danger-subtle/pressed/stroke, #ffa1a0);
+  color: var(--button/danger-subtle/pressed/text, #c61735);
+}
+
+.button-danger--variant-subtle:disabled,
+.button-danger--variant-subtle.button-danger--state-disabled {
+  background: var(--button/danger-subtle/disabled/background, #f7f7f7);
+  border-color: var(--button/danger-subtle/disabled/stroke, #babfcc);
+  color: var(--button/danger-subtle/disabled/text, #b2b2b2);
+  cursor: not-allowed;
+}
+
+.button-danger__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.button-danger--size-medium .button-danger__icon {
+  width: 24px;
+  height: 24px;
+}
+
+.button-danger--size-small .button-danger__icon {
+  width: 20px;
+  height: 20px;
+}
+
+.button-danger__label {
+  white-space: nowrap;
+}

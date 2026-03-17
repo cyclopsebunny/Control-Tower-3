@@ -1,0 +1,82 @@
+.switch-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sds-size-space-100, 4px);
+  width: 100%;
+}
+
+.switch-field__row {
+  display: flex;
+  gap: var(--sds-size-space-300, 12px);
+  align-items: center;
+  width: 100%;
+}
+
+.switch-field__label {
+  flex: 1 0 0;
+  font-family: var(--sds-typography-body-font-family, 'Inter', sans-serif);
+  font-size: var(--sds-typography-body-size-medium, 16px);
+  font-weight: var(--sds-typography-body-font-weight-regular, 400);
+  line-height: 1.4;
+  color: var(--sds-color-text-default-default, #17191c);
+  margin: 0;
+}
+
+.switch-field__switch {
+  position: relative;
+  width: 34px;
+  height: 14px;
+  background: var(--sds-color-background-neutral-tertiary, #b2b2b2);
+  border-radius: var(--sds-size-radius-full, 9999px);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.switch-field__switch:hover:not(.switch-field__switch--disabled) {
+  background: var(--sds-color-background-neutral-secondary, #999999);
+}
+
+.switch-field__switch--checked {
+  background: var(--sds-color-background-brand-default, #0a76db);
+}
+
+.switch-field__switch--checked:hover:not(.switch-field__switch--disabled) {
+  background: var(--sds-color-border-brand-tertiary, #4f95e8);
+}
+
+.switch-field__switch--disabled {
+  background: var(--sds-color-background-disabled-default, #f7f7f7);
+  cursor: not-allowed;
+}
+
+.switch-field__thumb {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border-radius: var(--sds-size-radius-full, 9999px);
+  transition: left 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.switch-field__switch--checked .switch-field__thumb {
+  left: calc(100% - 12px);
+}
+
+.switch-field__switch--disabled .switch-field__thumb {
+  background: var(--sds-color-background-disabled-default, #f7f7f7);
+}
+
+.switch-field__description {
+  font-family: var(--sds-typography-body-font-family, 'Inter', sans-serif);
+  font-size: var(--sds-typography-body-size-small, 14px);
+  font-weight: var(--sds-typography-body-font-weight-regular, 400);
+  line-height: 1.4;
+  color: var(--sds-color-text-default-secondary, #8a909e);
+  margin: 0;
+  width: 100%;
+}

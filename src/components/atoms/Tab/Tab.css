@@ -1,0 +1,54 @@
+.tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sds-size-space-150, 6px) var(--sds-size-space-600, 24px);
+  border: none;
+  border-radius: var(--nexus/shape/borderRadius/xs, 8px);
+  background: var(--sds-color-background-default-secondary, #f7f7f7);
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+  white-space: nowrap;
+}
+
+.tab:focus-visible {
+  outline: var(--sds-size-stroke-focus-ring, 2px) solid var(--sds-color-background-brand-default, #0a76db);
+  outline-offset: 2px;
+}
+
+.tab:hover:not(:disabled):not(.tab--active) {
+  background: var(--sds-color-background-default-secondary-hover, #ececec);
+}
+
+.tab--active {
+  background: var(--sds-color-background-neutral-default, #434343);
+}
+
+.tab--active:hover:not(:disabled) {
+  background: var(--sds-color-background-neutral-hover, #2b2b2b);
+}
+
+.tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tab__label {
+  font-family: var(--sds-typography-subheading-font-family, 'Inter', sans-serif);
+  font-size: var(--sds-typography-subheading-size-medium, 20px);
+  font-weight: var(--sds-typography-subheading-font-weight, 400);
+  line-height: 1.2000000476837158;
+  font-style: normal;
+  position: relative;
+  flex-shrink: 0;
+  color: var(--sds-color-text-neutral-secondary, #575d69);
+}
+
+.tab--active .tab__label {
+  font-family: var(--sds-typography-subheading-font-family, 'Inter', sans-serif);
+  font-weight: 600;
+  color: var(--text/primary/on-default, white);
+}

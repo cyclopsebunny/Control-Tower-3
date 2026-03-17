@@ -1,0 +1,35 @@
+.tabs {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.tabs--orientation-horizontal {
+  flex-direction: column;
+}
+
+.tabs--orientation-vertical {
+  flex-direction: row;
+}
+
+.tabs__list {
+  display: flex;
+  gap: var(--nexus/spacing/2, 8px);
+  align-items: flex-start;
+  position: relative;
+}
+
+.tabs--orientation-vertical .tabs__list {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.tabs__content {
+  margin-top: var(--sds-size-space-400, 16px);
+  width: 100%;
+}
+
+.tabs--orientation-vertical .tabs__content {
+  margin-top: 0;
+  margin-left: var(--sds-size-space-400, 16px);
+}

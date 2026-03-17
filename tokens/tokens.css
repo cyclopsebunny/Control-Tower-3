@@ -1,0 +1,203 @@
+:root {
+  /* Colors - Background */
+  --sds-color-background-default-default: #ffffff;
+  --sds-color-background-default-secondary: #f7f7f7;
+  --sds-color-background-default-secondary-hover: #ececec;
+  --sds-color-background-disabled-default: #f7f7f7;
+  --sds-color-background-brand-default: #0a76db;
+  --sds-color-background-brand-secondary: #e0eeff;
+  --sds-color-background-brand-tertiary: #e0eeff;
+  --sds-color-background-neutral-default: #434343;
+  --sds-color-background-neutral-hover: #2b2b2b;
+  --sds-color-background-neutral-secondary: #999999;
+  --sds-color-background-neutral-tertiary: #b2b2b2;
+
+  /* Colors - Border */
+  --sds-color-border-default-default: #babfcc;
+  --sds-color-border-brand-tertiary: #4f95e8;
+  --sds-color-border-neutral-default: #d1d7e3;
+  --sds-color-border-neutral-tertiary: #8a909e;
+  --sds-color-border-disabled-default: #babfcc;
+
+  /* Colors - Text */
+  --sds-color-text-default-default: #17191c;
+  --sds-color-text-default-secondary: #8a909e;
+  --sds-color-text-default-tertiary: #babfcc;
+  --sds-color-text-disabled-default: #b2b2b2;
+  --sds-color-text-disabled-on-disabled: #cccccc;
+  --sds-color-text-danger-default: #c61735;
+  --sds-color-text-neutral-on-neutral-secondary: #17191c;
+  --sds-color-text-neutral-on-neutral-tertiary: #222429;
+  --sds-color-text-neutral-secondary: #575d69;
+
+  /* Colors - Black */
+  --sds-color-black-100: #1313131a;
+  --sds-color-black-200: #13131333;
+
+  /* Spacing */
+  --sds-size-space-050: 2px;
+  --sds-size-space-100: 4px;
+  --sds-size-space-150: 6px;
+  --sds-size-space-200: 8px;
+  --sds-size-space-300: 12px;
+  --sds-size-space-400: 16px;
+  --sds-size-space-600: 24px;
+  --nexus/spacing/2: 8px;
+
+  /* Border Radius */
+  --sds-size-radius-100: 4px;
+  --sds-size-radius-200: 8px;
+  --sds-size-radius-400: 16px;
+  --sds-size-radius-full: 9999px;
+
+  /* Typography */
+  --sds-typography-body-font-family: Inter;
+  --sds-typography-family-mono: Inter;
+  --sds-typography-body-size-small: 14px;
+  --sds-typography-body-size-medium: 16px;
+  --sds-typography-scale-03: 16px;
+  --sds-typography-body-font-weight-regular: 400;
+  --sds-typography-body-font-weight-strong: 600;
+  --sds-typography-weight-regular: 400;
+  --sds-typography-subheading-font-family: Inter;
+  --sds-typography-subheading-size-medium: 20px;
+  --sds-typography-subheading-font-weight: 400;
+
+  /* Depth */
+  --sds-size-depth-0: 0;
+  --sds-size-depth-025: 1;
+  --sds-size-depth-100: 4;
+  --sds-size-depth-negative-025: -1;
+
+  /* Stroke */
+  --sds-size-stroke-border: 1px;
+  --sds-size-stroke-focus-ring: 2px;
+  --sds-responsive-border-width: 1px;
+
+  /* Button Colors - Default */
+  --button/default/enabled/background: #ffffff;
+  --button/default/enabled/stroke: #babfcc;
+  --button/default/enabled/text: #17191c;
+  --button/default/enabled/icon: #17191c;
+  --button/default/hover/background: #f7f7f7;
+  --button/default/hover/stroke: #babfcc;
+  --button/default/hover/text: #17191c;
+  --button/default/hover/icon: #17191c;
+  --button/default/pressed/background: #ececec;
+  --button/default/pressed/stroke: #babfcc;
+  --button/default/pressed/text: #17191c;
+  --button/default/pressed/icon: #17191c;
+  --button/default/disabled/background: #f7f7f7;
+  --button/default/disabled/stroke: #babfcc;
+  --button/default/disabled/text: #b2b2b2;
+  --button/default/disabled/icon: #b2b2b2;
+  --button/default/active/background: #e0eeff;
+  --button/default/active/stroke: #0a76db;
+  --button/default/active/text: #0a76db;
+  --button/default/active/icon: #0a76db;
+
+  /* Button Colors - CTA */
+  --button/CTA/enabled/background: #434343;
+  --button/CTA/enabled/stroke: #17191c;
+  --button/CTA/enabled/text: #ececec;
+  --button/CTA/enabled/icon: #ececec;
+  --button/CTA/hover/background: #2b2b2b;
+  --button/CTA/hover/stroke: #2b2b2b;
+  --button/CTA/hover/text: #ececec;
+  --button/CTA/hover/icon: #ececec;
+  --button/CTA/pressed/background: #8a909e;
+  --button/CTA/pressed/stroke: #8a909e;
+  --button/CTA/pressed/text: #ececec;
+  --button/CTA/pressed/icon: #ececec;
+  --button/CTA/disabled/background: #f7f7f7;
+  --button/CTA/disabled/stroke: #babfcc;
+  --button/CTA/disabled/text: #b2b2b2;
+  --button/CTA/disabled/icon: #b2b2b2;
+  --button/CTA/active/background: #575d69;
+  --button/CTA/active/stroke: #575d69;
+  --button/CTA/active/text: #ececec;
+  --button/CTA/active/icon: #ececec;
+
+  /* Button Colors - Brand */
+  --button/brand/enabled/background: #0a76db;
+  --button/brand/enabled/stroke: #0a76db;
+  --button/brand/enabled/text: #e0eeff;
+  --button/brand/enabled/icon: #e0eeff;
+  --button/brand/hover/background: #05549e;
+  --button/brand/hover/stroke: #0a76db;
+  --button/brand/hover/text: #e0eeff;
+  --button/brand/hover/icon: #e0eeff;
+  --button/brand/pressed/background: #e0eeff;
+  --button/brand/pressed/stroke: #0a76db;
+  --button/brand/pressed/text: #0a76db;
+  --button/brand/pressed/icon: #0a76db;
+  --button/brand/disabled/background: #f7f7f7;
+  --button/brand/disabled/stroke: #babfcc;
+  --button/brand/disabled/text: #b2b2b2;
+  --button/brand/disabled/icon: #b2b2b2;
+  --button/brand/active/background: #0a76db;
+  --button/brand/active/stroke: #0a76db;
+  --button/brand/active/text: #e0eeff;
+  --button/brand/active/icon: #e0eeff;
+
+  /* Button Colors - Subtle */
+  --button/subtle/enabled/text: #0a76db;
+  --button/subtle/enabled/icon: #0a76db;
+  --button/subtle/hover/background: #e0eeff;
+  --button/subtle/hover/text: #0a76db;
+  --button/subtle/hover/icon: #0a76db;
+  --button/subtle/pressed/background: #cae0fc;
+  --button/subtle/pressed/text: #0a76db;
+  --button/subtle/pressed/icon: #0a76db;
+  --button/subtle/disabled/background: #f7f7f7;
+  --button/subtle/disabled/stroke: #babfcc;
+  --button/subtle/disabled/text: #b2b2b2;
+  --button/subtle/disabled/icon: #b2b2b2;
+  --button/subtle/active/background: #e0eeff;
+  --button/subtle/active/text: #0a76db;
+  --button/subtle/active/icon: #0a76db;
+
+  /* Button Colors - Danger */
+  --button/danger/enabled/background: #fc5863;
+  --button/danger/enabled/stroke: #fc5863;
+  --button/danger/enabled/text: #ffe9e8;
+  --button/danger/enabled/icon: #ffe9e8;
+  --button/danger/hover/background: #f32245;
+  --button/danger/hover/stroke: #fc5863;
+  --button/danger/hover/text: #ffe9e8;
+  --button/danger/hover/icon: #ffe9e8;
+  --button/danger/pressed/background: #bf3617;
+  --button/danger/pressed/stroke: #c61735;
+  --button/danger/pressed/text: #ffe9e8;
+  --button/danger/pressed/icon: #ffe9e8;
+  --button/danger/disabled/background: #f7f7f7;
+  --button/danger/disabled/stroke: #babfcc;
+  --button/danger/disabled/text: #b2b2b2;
+  --button/danger/disabled/icon: #b2b2b2;
+
+  /* Button Colors - Danger Subtle */
+  --button/danger-subtle/enabled/text: #c61735;
+  --button/danger-subtle/enabled/icon: #c61735;
+  --button/danger-subtle/hover/background: #ffe9e8;
+  --button/danger-subtle/hover/stroke: #ffe9e8;
+  --button/danger-subtle/hover/text: #c61735;
+  --button/danger-subtle/hover/icon: #c61735;
+  --button/danger-subtle/pressed/background: #ffa1a0;
+  --button/danger-subtle/pressed/stroke: #ffa1a0;
+  --button/danger-subtle/pressed/text: #c61735;
+  --button/danger-subtle/pressed/icon: #c61735;
+  --button/danger-subtle/disabled/background: #f7f7f7;
+  --button/danger-subtle/disabled/stroke: #babfcc;
+  --button/danger-subtle/disabled/text: #b2b2b2;
+  --button/danger-subtle/disabled/icon: #b2b2b2;
+
+  /* Nexus Spacing */
+  --nexus/spacing/1: 4px;
+  --nexus/spacing/2: 8px;
+  --nexus/spacing/3: 12px;
+  --nexus/spacing/4: 16px;
+  --nexus/spacing/content/gap/sm: 8px;
+  --nexus/spacing/content/gap/md: 16px;
+  --nexus/shape/borderRadius/xs: 8px;
+  --nexus/shape/borderRadius/none: 0;
+}

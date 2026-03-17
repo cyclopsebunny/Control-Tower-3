@@ -1,0 +1,40 @@
+.container {
+  width: 100%;
+  margin: 0 auto;
+}
+
+.container--max-width-sm {
+  max-width: 640px;
+}
+
+.container--max-width-md {
+  max-width: 768px;
+}
+
+.container--max-width-lg {
+  max-width: 1024px;
+}
+
+.container--max-width-xl {
+  max-width: 1280px;
+}
+
+.container--max-width-full {
+  max-width: 100%;
+}
+
+.container--padding-none {
+  padding: 0;
+}
+
+.container--padding-sm {
+  padding: var(--sds-size-space-200, 8px);
+}
+
+.container--padding-md {
+  padding: var(--sds-size-space-400, 16px);
+}
+
+.container--padding-lg {
+  padding: calc(var(--sds-size-space-400, 16px) * 2);
+}
