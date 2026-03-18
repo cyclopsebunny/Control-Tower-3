@@ -130,6 +130,28 @@ type Selection =
   | { spaceKey: string; type: 'space' }
   | null;
 
+type SpaceDrag = {
+  pointerX: number;
+  pointerY: number;
+  sourceAngle: number;
+  sourceSpaceKey: string;
+};
+
+type DockDragHover = {
+  edge: Edge;
+  spaceKey: string;
+};
+
+type DragReturnPreview = {
+  edge: Edge;
+  fromX: number;
+  fromY: number;
+  sourceAngle: number;
+  toX: number;
+  toY: number;
+  assignment: SpaceAssignment;
+};
+
 type BuildingDrag = {
   buildingId: string;
   offsetX: number;
@@ -191,11 +213,39 @@ type CanvasPan = {
 
 type FacilityDocument = {
   appMode?: AppMode;
+  canvasBackgroundColor?: string;
   buildings: BuildingItem[];
   idCounter: number;
   operationsAssignments?: OperationsAssignments;
   rows: ParkingRow[];
   viewport: CanvasViewport;
+};
+
+type FilePickerAcceptType = {
+  accept: Record<string, string[]>;
+  description?: string;
+};
+
+type OpenFilePickerOptions = {
+  excludeAcceptAllOption?: boolean;
+  multiple?: boolean;
+  types?: FilePickerAcceptType[];
+};
+
+type SaveFilePickerOptions = {
+  excludeAcceptAllOption?: boolean;
+  suggestedName?: string;
+  types?: FilePickerAcceptType[];
+};
+
+type FileSystemWritableFileStreamLike = {
+  close: () => Promise<void>;
+  write: (data: string) => Promise<void>;
+};
+
+type FileSystemFileHandleLike = {
+  createWritable: () => Promise<FileSystemWritableFileStreamLike>;
+  getFile: () => Promise<File>;
 };
 
 const buildingDefaults: BuildingSettings = {
@@ -867,14 +917,19 @@ function App() {
   const canvasAreaRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const transparentDragImageRef = useRef<HTMLDivElement | null>(null);
+  const dropSucceededRef = useRef(false);
   const spaceRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const spaceIndicatorRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const spaceControlRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const idRef = useRef(1);
   const buildingPointerDownRef = useRef(false);
   const buildingDragDrawRef = useRef(false);
   const skipCanvasClickRef = useRef(false);
+  const skipNextSpaceSelectClearRef = useRef(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [documentHandle, setDocumentHandle] = useState<FileSystemFileHandleLike | null>(null);
   const [buildings, setBuildings] = useState<BuildingItem[]>([]);
   const [rows, setRows] = useState<ParkingRow[]>([]);
   const [buildingDraftStart, setBuildingDraftStart] = useState<{ x: number; y: number } | null>(null);
@@ -897,6 +952,15 @@ function App() {
   const [editingCombinedBuildingId, setEditingCombinedBuildingId] = useState<string | null>(null);
   const [appMode, setAppMode] = useState<AppMode>('build');
   const [operationsAssignments, setOperationsAssignments] = useState<OperationsAssignments>({});
+  const [moveTaskSelectionOverride, setMoveTaskSelectionOverride] = useState<string | null>(null);
+  const [moveTaskConnectionRefresh, setMoveTaskConnectionRefresh] = useState(0);
+  const [spaceDrag, setSpaceDrag] = useState<SpaceDrag | null>(null);
+  const [dockDragHover, setDockDragHover] = useState<DockDragHover | null>(null);
+  const [dragPreviewEdge, setDragPreviewEdge] = useState<Edge | null>(null);
+  const [dragPreviewFollowsSourceAngle, setDragPreviewFollowsSourceAngle] = useState(true);
+  const [dragReturnPreview, setDragReturnPreview] = useState<DragReturnPreview | null>(null);
+  const [dragReturnActive, setDragReturnActive] = useState(false);
+  const [canvasBackgroundColor, setCanvasBackgroundColor] = useState('#eaeaea');
   const [viewport, setViewport] = useState<CanvasViewport>({ scale: 1, x: 0, y: 0 });
   const [canvasPan, setCanvasPan] = useState<CanvasPan | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
@@ -926,6 +990,32 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      transparentDragImageRef.current?.remove();
+      transparentDragImageRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dragReturnPreview) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      setDragReturnActive(true);
+    });
+    const timeoutId = window.setTimeout(() => {
+      setDragReturnActive(false);
+      setDragReturnPreview(null);
+    }, 180);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [dragReturnPreview]);
+
   const handleOpenAddMenu = () => {
     setAddMenuOpen((current) => {
       const next = !current;
@@ -946,17 +1036,31 @@ function App() {
     });
   };
 
-  const handleSaveDocument = () => {
-    setMoreMenuOpen(false);
-    const doc: FacilityDocument = {
-      appMode,
-      buildings,
-      idCounter: idRef.current,
-      operationsAssignments,
-      rows,
-      viewport,
-    };
-    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+  const getWindowWithFilePickers = () =>
+    window as Window &
+      typeof globalThis & {
+        showOpenFilePicker?: (options?: OpenFilePickerOptions) => Promise<FileSystemFileHandleLike[]>;
+        showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FileSystemFileHandleLike>;
+      };
+
+  const getDocumentPayload = (mode: AppMode): FacilityDocument => ({
+    appMode: mode,
+    canvasBackgroundColor,
+    buildings,
+    idCounter: idRef.current,
+    operationsAssignments: mode === 'operations' ? operationsAssignments : {},
+    rows,
+    viewport,
+  });
+
+  const writeDocumentToHandle = async (handle: FileSystemFileHandleLike, mode: AppMode) => {
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(getDocumentPayload(mode), null, 2));
+    await writable.close();
+  };
+
+  const downloadDocument = (mode: AppMode) => {
+    const blob = new Blob([JSON.stringify(getDocumentPayload(mode), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -965,14 +1069,103 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleOpenDocument = () => {
+  const handleSaveAsDocument = async () => {
     setMoreMenuOpen(false);
+    const nextMode: AppMode = 'operations';
+    const pickerWindow = getWindowWithFilePickers();
+
+    try {
+      if (pickerWindow.showSaveFilePicker) {
+        const handle = await pickerWindow.showSaveFilePicker({
+          excludeAcceptAllOption: true,
+          suggestedName: 'control-tower-3.json',
+          types: [
+            {
+              accept: { 'application/json': ['.json'] },
+              description: 'Control Tower 3 drawing',
+            },
+          ],
+        });
+
+        await writeDocumentToHandle(handle, nextMode);
+        setDocumentHandle(handle);
+      } else {
+        downloadDocument(nextMode);
+        setDocumentHandle(null);
+      }
+
+      handleModeChange(nextMode);
+    } catch {
+      return;
+    }
+  };
+
+  const handleSaveDocument = async () => {
+    setMoreMenuOpen(false);
+    const nextMode: AppMode = 'operations';
+
+    try {
+      if (documentHandle) {
+        await writeDocumentToHandle(documentHandle, nextMode);
+      } else {
+        await handleSaveAsDocument();
+        return;
+      }
+
+      handleModeChange(nextMode);
+    } catch {
+      window.alert('Unable to save that drawing file.');
+    }
+  };
+
+  const handleNewDocument = () => {
+    setMoreMenuOpen(false);
+    setDocumentHandle(null);
+    resetInteractions();
+    setAppMode('build');
+    setBuildings([]);
+    setRows([]);
+    setOperationsAssignments({});
+    setCanvasBackgroundColor('#eaeaea');
+    setViewport({ scale: 1, x: 0, y: 0 });
+    idRef.current = 1;
+    setSelection(null);
+    setBuildingSettings(buildingDefaults);
+    setDockSettings(dockDefaults);
+    setRowSettings(rowDefaults);
+  };
+
+  const handleOpenDocument = async () => {
+    setMoreMenuOpen(false);
+    const pickerWindow = getWindowWithFilePickers();
+
+    if (pickerWindow.showOpenFilePicker) {
+      try {
+        const [handle] = await pickerWindow.showOpenFilePicker({
+          excludeAcceptAllOption: true,
+          multiple: false,
+          types: [
+            {
+              accept: { 'application/json': ['.json'] },
+              description: 'Control Tower 3 drawing',
+            },
+          ],
+        });
+
+        const file = await handle.getFile();
+        setDocumentHandle(handle);
+        await loadDocumentFile(file);
+      } catch {
+        return;
+      }
+
+      return;
+    }
+
     fileInputRef.current?.click();
   };
 
-  const handleDocumentSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-
+  const loadDocumentFile = async (file: File | null) => {
     if (!file) {
       return;
     }
@@ -985,6 +1178,7 @@ function App() {
       const nextMode = doc.appMode === 'operations' ? 'operations' : 'build';
 
       setAppMode(nextMode);
+      setCanvasBackgroundColor(doc.canvasBackgroundColor ?? '#eaeaea');
       setBuildings(nextBuildings);
       setOperationsAssignments(
         doc.operationsAssignments ?? (nextMode === 'operations' ? buildOperationsAssignments(nextBuildings, nextRows) : {})
@@ -992,6 +1186,7 @@ function App() {
       setRows(nextRows);
       setViewport(doc.viewport ?? { scale: 1, x: 0, y: 0 });
       idRef.current = typeof doc.idCounter === 'number' ? doc.idCounter : 1;
+      setMoveTaskSelectionOverride(null);
       setSelection(null);
       setSelectedBuildingIds([]);
       setEditingCombinedBuildingId(null);
@@ -999,9 +1194,14 @@ function App() {
       setMoreMenuOpen(false);
     } catch {
       window.alert('Unable to open that drawing file.');
-    } finally {
-      event.target.value = '';
     }
+  };
+
+  const handleDocumentSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    setDocumentHandle(null);
+    await loadDocumentFile(file ?? null);
+    event.target.value = '';
   };
 
   const resetInteractions = () => {
@@ -1023,6 +1223,8 @@ function App() {
     setBuildingComponentResize(null);
     setRowDrag(null);
     setRowHandleDrag(null);
+    setMoveTaskSelectionOverride(null);
+    setSpaceDrag(null);
     setEditingCombinedBuildingId(null);
     setCanvasPan(null);
     buildingPointerDownRef.current = false;
@@ -1107,14 +1309,17 @@ function App() {
 
   const getCanvasPoint = (clientX: number, clientY: number) => {
     const bounds = canvasRef.current?.getBoundingClientRect();
+    const canvasStyles = canvasRef.current ? window.getComputedStyle(canvasRef.current) : null;
     const visibleWorldBounds = getVisibleWorldBounds();
 
-    if (!bounds || !visibleWorldBounds) {
+    if (!bounds || !canvasStyles || !visibleWorldBounds) {
       return null;
     }
 
-    const worldX = (clientX - bounds.left - viewport.x) / viewport.scale;
-    const worldY = (clientY - bounds.top - viewport.y) / viewport.scale;
+    const originX = bounds.left + parseFloat(canvasStyles.paddingLeft || '0');
+    const originY = bounds.top + parseFloat(canvasStyles.paddingTop || '0');
+    const worldX = (clientX - originX - viewport.x) / viewport.scale;
+    const worldY = (clientY - originY - viewport.y) / viewport.scale;
 
     return {
       x: Math.max(visibleWorldBounds.minX, Math.min(worldX, visibleWorldBounds.maxX)),
@@ -1124,16 +1329,19 @@ function App() {
 
   const getVisibleWorldBounds = () => {
     const bounds = canvasRef.current?.getBoundingClientRect();
+    const canvasStyles = canvasRef.current ? window.getComputedStyle(canvasRef.current) : null;
 
-    if (!bounds) {
+    if (!bounds || !canvasStyles) {
       return null;
     }
 
+    const paddingLeft = parseFloat(canvasStyles.paddingLeft || '0');
+    const paddingTop = parseFloat(canvasStyles.paddingTop || '0');
     return {
-      maxX: (bounds.width - viewport.x) / viewport.scale,
-      maxY: (bounds.height - viewport.y) / viewport.scale,
-      minX: -viewport.x / viewport.scale,
-      minY: -viewport.y / viewport.scale,
+      maxX: (bounds.width - paddingLeft - viewport.x) / viewport.scale,
+      maxY: (bounds.height - paddingTop - viewport.y) / viewport.scale,
+      minX: (-paddingLeft - viewport.x) / viewport.scale,
+      minY: (-paddingTop - viewport.y) / viewport.scale,
     };
   };
 
@@ -1716,6 +1924,7 @@ function App() {
     }
 
     setSelection(null);
+    setMoveTaskSelectionOverride(null);
     setSelectedBuildingIds([]);
     setEditingCombinedBuildingId(null);
   };
@@ -1969,6 +2178,262 @@ function App() {
     return;
   };
 
+  const handleSpaceDragStart = (
+    spaceKey: string,
+    sourceEdge: Edge,
+    sourceAngle: number,
+    pointer: { x: number; y: number }
+  ) => {
+    const assignment = operationsAssignments[spaceKey];
+
+    if (
+      appMode !== 'operations' ||
+      !assignment?.trailer ||
+      !(
+        (assignment.type === 'yard' && assignment.state !== 'move-task') ||
+        (assignment.type === 'dock' && assignment.state === 'move-task')
+      )
+    ) {
+      return false;
+    }
+
+    setSpaceDrag({ pointerX: pointer.x, pointerY: pointer.y, sourceAngle, sourceSpaceKey: spaceKey });
+    setDragPreviewEdge(sourceEdge);
+    setDragPreviewFollowsSourceAngle(true);
+    dropSucceededRef.current = false;
+    return true;
+  };
+
+  const handleSpaceDragEnd = () => {
+    transparentDragImageRef.current?.remove();
+    transparentDragImageRef.current = null;
+
+    if (!dropSucceededRef.current && spaceDrag && dragPreviewAssignment && dragPreviewEdge) {
+      const sourceNode = spaceRefs.current[spaceDrag.sourceSpaceKey];
+      const sourceBounds = sourceNode?.getBoundingClientRect();
+
+      if (sourceBounds) {
+        setDragReturnActive(false);
+        setDragReturnPreview({
+          assignment: dragPreviewAssignment,
+          edge: dragPreviewEdge,
+          fromX: spaceDrag.pointerX,
+          fromY: spaceDrag.pointerY,
+          sourceAngle: dragPreviewFollowsSourceAngle ? spaceDrag.sourceAngle : 0,
+          toX: sourceBounds.left + sourceBounds.width / 2,
+          toY: sourceBounds.top + sourceBounds.height / 2,
+        });
+      }
+    }
+
+    dropSucceededRef.current = false;
+    setDockDragHover(null);
+    setDragPreviewEdge(null);
+    setDragPreviewFollowsSourceAngle(true);
+    setSpaceDrag(null);
+  };
+
+  const setSpaceDragPreview = (event: React.DragEvent<HTMLDivElement>) => {
+    const transparentNode = document.createElement('div');
+
+    transparentDragImageRef.current?.remove();
+    transparentDragImageRef.current = transparentNode;
+
+    transparentNode.style.position = 'fixed';
+    transparentNode.style.top = '-10000px';
+    transparentNode.style.left = '-10000px';
+    transparentNode.style.width = '1px';
+    transparentNode.style.height = '1px';
+    transparentNode.style.opacity = '0';
+    transparentNode.style.pointerEvents = 'none';
+
+    document.body.appendChild(transparentNode);
+    event.dataTransfer.setDragImage(transparentNode, 0, 0);
+  };
+
+  const handleSpaceDragMove = (event: React.DragEvent<HTMLDivElement>) => {
+    if (event.clientX === 0 && event.clientY === 0) {
+      return;
+    }
+
+    setSpaceDrag((current) =>
+      current
+        ? {
+            ...current,
+            pointerX: event.clientX,
+            pointerY: event.clientY,
+          }
+        : current
+    );
+  };
+
+  const handleSpaceDrop = (targetSpaceKey: string) => {
+    const sourceSpaceKey = spaceDrag?.sourceSpaceKey;
+    const sourceAssignment = sourceSpaceKey ? operationsAssignments[sourceSpaceKey] : null;
+    const targetAssignment = operationsAssignments[targetSpaceKey];
+    const sourceIsNewMoveTask =
+      sourceAssignment?.type === 'yard' && sourceAssignment.state !== 'move-task' && Boolean(sourceAssignment.trailer);
+    const sourceIsDockReassign =
+      sourceAssignment?.type === 'dock' && sourceAssignment.state === 'move-task' && Boolean(sourceAssignment.trailer);
+
+    if (
+      !sourceSpaceKey ||
+      sourceSpaceKey === targetSpaceKey ||
+      !sourceAssignment?.trailer ||
+      (!sourceIsNewMoveTask && !sourceIsDockReassign) ||
+      !targetAssignment ||
+      targetAssignment.type !== 'dock' ||
+      targetAssignment.state !== 'default'
+    ) {
+      setDockDragHover(null);
+      setDragPreviewEdge(null);
+      setSpaceDrag(null);
+      return;
+    }
+
+    setOperationsAssignments((current) => {
+      const nextSourceAssignment = current[sourceSpaceKey];
+      const nextTargetAssignment = current[targetSpaceKey];
+
+      if (
+        !nextSourceAssignment?.trailer ||
+        !(
+          (nextSourceAssignment.type === 'yard' && nextSourceAssignment.state !== 'move-task') ||
+          (nextSourceAssignment.type === 'dock' && nextSourceAssignment.state === 'move-task')
+        ) ||
+        !nextTargetAssignment ||
+        nextTargetAssignment.type !== 'dock' ||
+        nextTargetAssignment.state !== 'default'
+      ) {
+        return current;
+      }
+
+      if (nextSourceAssignment.type === 'yard') {
+        return {
+          ...current,
+          [sourceSpaceKey]: {
+            ...nextSourceAssignment,
+            state: 'move-task',
+          },
+          [targetSpaceKey]: {
+            ...nextTargetAssignment,
+            state: 'move-task',
+            trailer: nextSourceAssignment.trailer,
+          },
+        };
+      }
+
+      return {
+        ...current,
+        [sourceSpaceKey]: {
+          ...nextSourceAssignment,
+          state: 'default',
+          trailer: null,
+        },
+        [targetSpaceKey]: {
+          ...nextTargetAssignment,
+          state: 'move-task',
+          trailer: nextSourceAssignment.trailer,
+        },
+      };
+    });
+    setMoveTaskSelectionOverride(sourceAssignment.trailer.trailerNumber);
+    skipNextSpaceSelectClearRef.current = true;
+    setSelection({ spaceKey: targetSpaceKey, type: 'space' });
+    dropSucceededRef.current = true;
+    setDockDragHover(null);
+    setDragPreviewEdge(null);
+    setDragPreviewFollowsSourceAngle(true);
+    setSpaceDrag(null);
+  };
+
+  const handleSpaceSelect = (spaceKey: string) => {
+    const assignment = operationsAssignments[spaceKey];
+
+    if (skipNextSpaceSelectClearRef.current) {
+      skipNextSpaceSelectClearRef.current = false;
+    } else if (assignment?.state === 'move-task' && assignment.trailer?.trailerNumber) {
+      setMoveTaskSelectionOverride(assignment.trailer.trailerNumber);
+    } else {
+      setMoveTaskSelectionOverride(null);
+    }
+
+    setSelection({ spaceKey, type: 'space' });
+  };
+
+  const handleCancelMoveTask = (trailerNumber: string) => {
+    setOperationsAssignments((current) => {
+      const next: OperationsAssignments = { ...current };
+
+      Object.values(current).forEach((assignment) => {
+        if (assignment.state !== 'move-task' || assignment.trailer?.trailerNumber !== trailerNumber) {
+          return;
+        }
+
+        next[assignment.key] =
+          assignment.type === 'yard'
+            ? {
+                ...assignment,
+                state: 'occupied',
+              }
+            : {
+                ...assignment,
+                state: 'default',
+                trailer: null,
+              };
+      });
+
+      return next;
+    });
+
+    if (selection?.type === 'space') {
+      const selectedAssignment = operationsAssignments[selection.spaceKey];
+
+      if (selectedAssignment?.trailer?.trailerNumber === trailerNumber) {
+        setSelection({ spaceKey: selection.spaceKey, type: 'space' });
+      }
+    }
+
+    setMoveTaskSelectionOverride(null);
+  };
+
+  const handleDockAvailabilityToggle = (spaceKey: string, nextState: 'default' | 'blocked') => {
+    setOperationsAssignments((current) => {
+      const assignment = current[spaceKey];
+
+      if (!assignment || assignment.type !== 'dock') {
+        return current;
+      }
+
+      return {
+        ...current,
+        [spaceKey]: {
+          ...assignment,
+          state: nextState,
+          trailer: nextState === 'blocked' ? null : assignment.trailer,
+        },
+      };
+    });
+  };
+
+  const handleEndSession = (spaceKey: string) => {
+    setOperationsAssignments((current) => {
+      const assignment = current[spaceKey];
+
+      if (!assignment || assignment.state !== 'in-progress') {
+        return current;
+      }
+
+      return {
+        ...current,
+        [spaceKey]: {
+          ...assignment,
+          state: 'issue',
+        },
+      };
+    });
+  };
+
   const handleEdgeSelect = (buildingId: string, anchor: DockAnchor) => {
     if (!selectingEdge) {
       return;
@@ -2011,9 +2476,10 @@ function App() {
   const selectedSpaceAssignment =
     selection?.type === 'space' ? operationsAssignments[selection.spaceKey] ?? null : null;
   const selectedMoveTaskTrailerNumber =
-    selection?.type === 'space' && selectedSpaceAssignment?.state === 'move-task'
+    moveTaskSelectionOverride ??
+    (selection?.type === 'space' && selectedSpaceAssignment?.state === 'move-task'
       ? selectedSpaceAssignment.trailer?.trailerNumber ?? null
-      : null;
+      : null);
   const selectedMoveTaskAssignments =
     selectedMoveTaskTrailerNumber === null
       ? []
@@ -2022,11 +2488,63 @@ function App() {
             assignment.state === 'move-task' && assignment.trailer?.trailerNumber === selectedMoveTaskTrailerNumber
         );
   const selectedMoveTaskSpaceKeys = new Set(selectedMoveTaskAssignments.map((assignment) => assignment.key));
+  const draggedSpaceKey = spaceDrag?.sourceSpaceKey ?? null;
+  const dragPreviewAssignment =
+    spaceDrag && appMode === 'operations' ? operationsAssignments[spaceDrag.sourceSpaceKey] ?? null : null;
+  const selectedYardMoveTaskAssignment =
+    appMode === 'operations' &&
+    selection?.type === 'space' &&
+    selectedSpaceAssignment?.type === 'yard' &&
+    selectedSpaceAssignment.state === 'move-task' &&
+    selectedSpaceAssignment.trailer
+      ? selectedSpaceAssignment
+      : null;
+  const selectedYardMoveTaskBounds = selectedYardMoveTaskAssignment
+    ? spaceRefs.current[selectedYardMoveTaskAssignment.key]?.getBoundingClientRect() ?? null
+    : null;
+  const selectedDockAvailabilityAssignment =
+    appMode === 'operations' &&
+    selection?.type === 'space' &&
+    selectedSpaceAssignment?.type === 'dock' &&
+    (selectedSpaceAssignment.state === 'default' || selectedSpaceAssignment.state === 'blocked')
+      ? selectedSpaceAssignment
+      : null;
+  const selectedDockAvailabilityBounds = selectedDockAvailabilityAssignment
+    ? spaceRefs.current[selectedDockAvailabilityAssignment.key]?.getBoundingClientRect() ?? null
+    : null;
+  const selectedInProgressAssignment =
+    appMode === 'operations' &&
+    selection?.type === 'space' &&
+    selectedSpaceAssignment?.state === 'in-progress' &&
+    selectedSpaceAssignment.trailer
+      ? selectedSpaceAssignment
+      : null;
+  const selectedInProgressBounds = selectedInProgressAssignment
+    ? spaceRefs.current[selectedInProgressAssignment.key]?.getBoundingClientRect() ?? null
+    : null;
+
+  useEffect(() => {
+    if (appMode !== 'operations' || selectedMoveTaskTrailerNumber === null) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      setMoveTaskConnectionRefresh((current) => current + 1);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [appMode, operationsAssignments, selectedMoveTaskTrailerNumber]);
+
   const registerSpaceRef = (spaceKey: string, node: HTMLDivElement | null) => {
     spaceRefs.current[spaceKey] = node;
   };
   const registerSpaceIndicatorRef = (spaceKey: string, node: HTMLSpanElement | null) => {
     spaceIndicatorRefs.current[spaceKey] = node;
+  };
+  const registerSpaceControlRef = (spaceKey: string, node: HTMLSpanElement | null) => {
+    spaceControlRefs.current[spaceKey] = node;
   };
   const getNodeCenter = (node: Element, canvasBounds: DOMRect) => {
     const bounds = node.getBoundingClientRect();
@@ -2036,37 +2554,9 @@ function App() {
       y: bounds.top - canvasBounds.top + bounds.height / 2,
     };
   };
-  const getOutwardVector = (assignment: SpaceAssignment) => {
-    if (assignment.edge === 'top') {
-      return { x: 0, y: 1 };
-    }
-
-    if (assignment.edge === 'bottom') {
-      return { x: 0, y: -1 };
-    }
-
-    if (assignment.edge === 'left') {
-      return { x: 1, y: 0 };
-    }
-
-    return { x: -1, y: 0 };
-  };
-  const getConnectionControlPoint = (
-    assignment: SpaceAssignment,
-    point: { x: number; y: number },
-    side: 'start' | 'end'
-  ) => {
-    const offset = 72;
-    const vector = getOutwardVector(assignment);
-    const multiplier = side === 'start' ? 1 : -1;
-
-    return {
-      x: point.x + vector.x * offset * multiplier,
-      y: point.y + vector.y * offset * multiplier,
-    };
-  };
-
   const getMoveTaskConnectionPath = () => {
+    void moveTaskConnectionRefresh;
+
     if (appMode !== 'operations' || selectedMoveTaskAssignments.length < 2) {
       return null;
     }
@@ -2082,16 +2572,18 @@ function App() {
     const dockAssignment =
       selectedMoveTaskAssignments.find((assignment) => assignment.type === 'dock') ?? selectedMoveTaskAssignments[1];
     const yardIndicator = spaceIndicatorRefs.current[yardAssignment.key];
+    const yardControl = spaceControlRefs.current[yardAssignment.key];
     const dockIndicator = spaceIndicatorRefs.current[dockAssignment.key];
+    const dockControl = spaceControlRefs.current[dockAssignment.key];
 
-    if (!yardIndicator || !dockIndicator) {
+    if (!yardIndicator || !yardControl || !dockIndicator || !dockControl) {
       return null;
     }
 
     const start = getNodeCenter(yardIndicator, canvasBounds);
-    const startControl = getConnectionControlPoint(yardAssignment, start, 'start');
+    const startControl = getNodeCenter(yardControl, canvasBounds);
     const end = getNodeCenter(dockIndicator, canvasBounds);
-    const endControl = getConnectionControlPoint(dockAssignment, end, 'end');
+    const endControl = getNodeCenter(dockControl, canvasBounds);
 
     return `M ${start.x} ${start.y} C ${startControl.x} ${startControl.y}, ${endControl.x} ${endControl.y}, ${end.x} ${end.y}`;
   };
@@ -2222,58 +2714,35 @@ function App() {
         <div className="canvas-panel">
           <header className="canvas-toolbar">
             <div className="canvas-toolbar__search" />
-            <div className="mode-switch" role="tablist" aria-label="Application mode">
-              <button
-                aria-selected={appMode === 'build'}
-                className={['mode-switch__button', appMode === 'build' ? 'mode-switch__button--active' : '']
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => handleModeChange('build')}
-                type="button"
-              >
-                Build
-              </button>
-              <button
-                aria-selected={appMode === 'operations'}
-                className={['mode-switch__button', appMode === 'operations' ? 'mode-switch__button--active' : '']
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => handleModeChange('operations')}
-                type="button"
-              >
-                Operations
-              </button>
-            </div>
-            <div className="toolbar-menu">
-              <button
-                className={[
-                  'toolbar-button',
-                  'toolbar-button--primary',
-                  appMode === 'operations' ? 'toolbar-button--disabled' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                disabled={appMode === 'operations'}
-                onClick={handleOpenAddMenu}
-                type="button"
-              >
-                <span className="toolbar-button__plus">+</span>
-                <span>Add</span>
-              </button>
-              {addMenuOpen ? (
-                <div className="action-menu action-menu--add">
-                  <button className="action-menu__item action-menu__item--active" onClick={handleStartBuilding} type="button">
-                    Building
-                  </button>
-                  <button className="action-menu__item" onClick={handleAddDock} type="button">
-                    Dock
-                  </button>
-                  <button className="action-menu__item" onClick={handleStartRow} type="button">
-                    Row
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            {appMode === 'build' ? (
+              <div className="toolbar-menu">
+                <button
+                  className={['toolbar-button', 'toolbar-button--primary'].join(' ')}
+                  onClick={handleOpenAddMenu}
+                  type="button"
+                >
+                  <span className="toolbar-button__plus">+</span>
+                  <span>Add</span>
+                </button>
+                {addMenuOpen ? (
+                  <div className="action-menu action-menu--add">
+                    <button
+                      className="action-menu__item action-menu__item--active"
+                      onClick={handleStartBuilding}
+                      type="button"
+                    >
+                      Building
+                    </button>
+                    <button className="action-menu__item" onClick={handleAddDock} type="button">
+                      Dock
+                    </button>
+                    <button className="action-menu__item" onClick={handleStartRow} type="button">
+                      Row
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="toolbar-menu toolbar-menu--more">
               <button aria-label="More actions" className="toolbar-more" onClick={handleOpenMoreMenu} type="button">
                 <span />
@@ -2282,11 +2751,23 @@ function App() {
               </button>
               {moreMenuOpen ? (
                 <div className="action-menu action-menu--more">
+                  <button className="action-menu__item" onClick={handleNewDocument} type="button">
+                    New
+                  </button>
                   <button className="action-menu__item" onClick={handleOpenDocument} type="button">
                     Open
                   </button>
-                  <button className="action-menu__item" onClick={handleSaveDocument} type="button">
-                    Save
+                  {appMode === 'operations' ? (
+                    <button className="action-menu__item" onClick={() => handleModeChange('build')} type="button">
+                      Edit
+                    </button>
+                  ) : (
+                    <button className="action-menu__item" onClick={handleSaveDocument} type="button">
+                      Save
+                    </button>
+                  )}
+                  <button className="action-menu__item" onClick={handleSaveAsDocument} type="button">
+                    Save As
                   </button>
                 </div>
               ) : null}
@@ -2311,6 +2792,7 @@ function App() {
               .filter(Boolean)
               .join(' ')}
             ref={canvasAreaRef}
+            style={{ background: canvasBackgroundColor }}
             onWheel={handleCanvasWheel}
             onMouseLeave={handleCanvasLeave}
             onMouseMove={handleCanvasMove}
@@ -2445,12 +2927,18 @@ function App() {
                 {rows.map((row) => (
                   <ParkingRowView
                     appMode={appMode}
+                    draggedSpaceKey={draggedSpaceKey}
                     isPreview={false}
                     key={row.id}
                     onMoveStart={handleRowMoveStart}
                     onHandleStart={handleRowHandleStart}
-                    onSpaceSelect={(spaceKey) => setSelection({ spaceKey, type: 'space' })}
+                    onSpaceDragEnd={handleSpaceDragEnd}
+                    onSpaceDragMove={handleSpaceDragMove}
+                    onSpaceDragStart={handleSpaceDragStart}
+                    onSpaceDragPreview={setSpaceDragPreview}
+                    onSpaceSelect={handleSpaceSelect}
                     operationsAssignments={operationsAssignments}
+                    registerSpaceControlRef={registerSpaceControlRef}
                     registerSpaceIndicatorRef={registerSpaceIndicatorRef}
                     registerSpaceRef={registerSpaceRef}
                     row={row}
@@ -2725,21 +3213,75 @@ function App() {
 
                             return (
                               <Dock
+                                controlRef={(node) => registerSpaceControlRef(spaceKey, node)}
+                                draggable={
+                                  appMode === 'operations' &&
+                                  assignment?.type === 'dock' &&
+                                  assignment.state === 'move-task' &&
+                                  Boolean(assignment.trailer)
+                                }
+                                dropHovered={dockDragHover?.spaceKey === spaceKey}
                                 edge={dockPlacement.edge}
                                 hideMoveIndicator={selectedMoveTaskSpaceKeys.has(spaceKey)}
                                 indicatorRef={(node) => registerSpaceIndicatorRef(spaceKey, node)}
                                 key={dock}
                                 label={dock}
+                                onDrag={handleSpaceDragMove}
+                                onDragEnd={handleSpaceDragEnd}
+                                onDragLeave={() => {
+                                  setDockDragHover((current) => (current?.spaceKey === spaceKey ? null : current));
+                                }}
+                                onDragOver={(event) => {
+                                  const sourceKey = spaceDrag?.sourceSpaceKey;
+                                  const targetAssignment = operationsAssignments[spaceKey];
+                                  const sourceAssignment = sourceKey ? operationsAssignments[sourceKey] : null;
+
+                                  if (
+                                    appMode === 'operations' &&
+                                    (
+                                      (sourceAssignment?.type === 'yard' && sourceAssignment.state !== 'move-task') ||
+                                      (sourceAssignment?.type === 'dock' && sourceAssignment.state === 'move-task')
+                                    ) &&
+                                    sourceAssignment.trailer &&
+                                    targetAssignment?.type === 'dock' &&
+                                    targetAssignment.state === 'default'
+                                  ) {
+                                    event.preventDefault();
+                                    event.dataTransfer.dropEffect = 'move';
+                                    setDockDragHover({ edge: dockPlacement.edge, spaceKey });
+                                    setDragPreviewEdge(dockPlacement.edge);
+                                    setDragPreviewFollowsSourceAngle(false);
+                                  }
+                                }}
+                                onDragStart={(event) => {
+                                  const allowed = handleSpaceDragStart(spaceKey, dockPlacement.edge, 0, {
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                  });
+
+                                  if (!allowed) {
+                                    event.preventDefault();
+                                    return;
+                                  }
+
+                                  event.stopPropagation();
+                                  event.dataTransfer.effectAllowed = 'move';
+                                  event.dataTransfer.setData('text/plain', spaceKey);
+                                  setSpaceDragPreview(event);
+                                }}
+                                onDrop={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  handleSpaceDrop(spaceKey);
+                                }}
                                 onClick={
                                   appMode === 'operations'
                                     ? () =>
-                                        setSelection({
-                                          spaceKey,
-                                          type: 'space',
-                                        })
+                                        handleSpaceSelect(spaceKey)
                                     : undefined
                                 }
                                 selected={
+                                  draggedSpaceKey === spaceKey ||
                                   (selection?.type === 'space' && selection.spaceKey === spaceKey) ||
                                   (selectedMoveTaskTrailerNumber !== null &&
                                     assignment?.state === 'move-task' &&
@@ -2777,12 +3319,18 @@ function App() {
                 {previewRow ? (
                   <ParkingRowView
                     appMode={appMode}
+                    draggedSpaceKey={null}
                     isPreview
                     onHandleStart={() => undefined}
                     onMoveStart={() => undefined}
+                    onSpaceDragEnd={() => undefined}
+                    onSpaceDragMove={() => undefined}
+                    onSpaceDragStart={() => false}
+                    onSpaceDragPreview={() => undefined}
                     onSelect={() => undefined}
                     onSpaceSelect={() => undefined}
                     operationsAssignments={operationsAssignments}
+                    registerSpaceControlRef={registerSpaceControlRef}
                     registerSpaceIndicatorRef={registerSpaceIndicatorRef}
                     registerSpaceRef={registerSpaceRef}
                     row={previewRow}
@@ -3371,23 +3919,13 @@ function App() {
               </>
             ) : (
               <>
-                <Field label="Name">
-                  <input
-                    value={buildingSettings.name}
-                    onChange={(event) =>
-                      setBuildingSettings((current) => ({ ...current, name: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label="Color">
+                <Field label="Background Color">
                   <div className="color-swatch">
                     <input
-                      aria-label="Building color"
+                      aria-label="Canvas background color"
                       type="color"
-                      value={buildingSettings.color}
-                      onChange={(event) =>
-                        setBuildingSettings((current) => ({ ...current, color: event.target.value }))
-                      }
+                      value={canvasBackgroundColor}
+                      onChange={(event) => setCanvasBackgroundColor(event.target.value)}
                     />
                   </div>
                 </Field>
@@ -3409,6 +3947,7 @@ function App() {
                 onClick={() => {
                   if (selection?.type === 'row' && selectedRow) {
                     setRows((current) => current.filter((row) => row.id !== selectedRow.id));
+                    setMoveTaskSelectionOverride(null);
                     setSelection(null);
                     return;
                   }
@@ -3425,6 +3964,7 @@ function App() {
                   if (selection?.type === 'building' && selectedBuilding) {
                     setBuildings((current) => current.filter((building) => building.id !== selectedBuilding.id));
                     setSelectedBuildingIds((current) => current.filter((id) => id !== selectedBuilding.id));
+                    setMoveTaskSelectionOverride(null);
                     setSelection(null);
                     setEditingCombinedBuildingId(null);
                   }
@@ -3445,6 +3985,119 @@ function App() {
           </footer>
         </aside>
       </section>
+      {dragPreviewAssignment && dragPreviewEdge && spaceDrag ? (
+        <div
+          className="space-drag-preview"
+          style={{
+            left: `${spaceDrag.pointerX}px`,
+            top: `${spaceDrag.pointerY}px`,
+            transform: `translate(-50%, -50%) rotate(${dragPreviewFollowsSourceAngle ? spaceDrag.sourceAngle : 0}deg)`,
+          }}
+        >
+          <Dock
+            draggable={false}
+            edge={dragPreviewEdge}
+            label={dragPreviewAssignment.slotLabel}
+            selected={false}
+            state={dragPreviewAssignment.state}
+            trailerNumber={dragPreviewAssignment.trailer?.trailerNumber ?? null}
+            type={dragPreviewAssignment.type}
+          />
+        </div>
+      ) : null}
+      {dragReturnPreview ? (
+        <div
+          className={[
+            'space-drag-preview',
+            'space-drag-preview--returning',
+            dragReturnActive ? 'space-drag-preview--returning-active' : '',
+          ].join(' ')}
+          style={{
+            left: `${dragReturnActive ? dragReturnPreview.toX : dragReturnPreview.fromX}px`,
+            top: `${dragReturnActive ? dragReturnPreview.toY : dragReturnPreview.fromY}px`,
+            transform: `translate(-50%, -50%) rotate(${dragReturnPreview.sourceAngle}deg)`,
+          }}
+        >
+          <Dock
+            draggable={false}
+            edge={dragReturnPreview.edge}
+            label={dragReturnPreview.assignment.slotLabel}
+            selected={false}
+            state={dragReturnPreview.assignment.state}
+            trailerNumber={dragReturnPreview.assignment.trailer?.trailerNumber ?? null}
+            type={dragReturnPreview.assignment.type}
+          />
+        </div>
+      ) : null}
+      {selectedYardMoveTaskAssignment && selectedYardMoveTaskBounds ? (
+        <div
+          className="move-task-popover"
+          style={{
+            left: `${selectedYardMoveTaskBounds.left + selectedYardMoveTaskBounds.width / 2}px`,
+            top: `${selectedYardMoveTaskBounds.top - 14}px`,
+          }}
+        >
+          <div className="move-task-popover__title">{selectedYardMoveTaskAssignment.trailer!.trailerNumber}</div>
+          <div className="move-task-popover__meta">{selectedYardMoveTaskAssignment.trailer!.carrierName}</div>
+          <button
+            className="move-task-popover__action"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleCancelMoveTask(selectedYardMoveTaskAssignment.trailer!.trailerNumber);
+            }}
+            type="button"
+          >
+            Cancel move
+          </button>
+        </div>
+      ) : null}
+      {selectedDockAvailabilityAssignment && selectedDockAvailabilityBounds ? (
+        <div
+          className="move-task-popover"
+          style={{
+            left: `${selectedDockAvailabilityBounds.left + selectedDockAvailabilityBounds.width / 2}px`,
+            top: `${selectedDockAvailabilityBounds.top - 14}px`,
+          }}
+        >
+          <div className="move-task-popover__title">{selectedDockAvailabilityAssignment.slotLabel}</div>
+          <div className="move-task-popover__meta">{selectedDockAvailabilityAssignment.groupName}</div>
+          <button
+            className="move-task-popover__action"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleDockAvailabilityToggle(
+                selectedDockAvailabilityAssignment.key,
+                selectedDockAvailabilityAssignment.state === 'blocked' ? 'default' : 'blocked'
+              );
+            }}
+            type="button"
+          >
+            {selectedDockAvailabilityAssignment.state === 'blocked' ? 'Unblock dock' : 'Block dock'}
+          </button>
+        </div>
+      ) : null}
+      {selectedInProgressAssignment && selectedInProgressBounds ? (
+        <div
+          className="move-task-popover"
+          style={{
+            left: `${selectedInProgressBounds.left + selectedInProgressBounds.width / 2}px`,
+            top: `${selectedInProgressBounds.top - 14}px`,
+          }}
+        >
+          <div className="move-task-popover__title">{selectedInProgressAssignment.trailer!.trailerNumber}</div>
+          <div className="move-task-popover__meta">{selectedInProgressAssignment.trailer!.carrierName}</div>
+          <button
+            className="move-task-popover__action"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleEndSession(selectedInProgressAssignment.key);
+            }}
+            type="button"
+          >
+            End Session
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -3465,10 +4118,19 @@ function Field({
 }
 
 function Dock({
+  controlRef,
+  draggable = false,
+  dropHovered = false,
   edge,
   hideMoveIndicator = false,
   indicatorRef,
   label,
+  onDrag,
+  onDragEnd,
+  onDragLeave,
+  onDragOver,
+  onDragStart,
+  onDrop,
   onClick,
   rotateLabel = false,
   selected = false,
@@ -3477,10 +4139,19 @@ function Dock({
   trailerNumber,
   type = 'dock',
 }: {
+  controlRef?: (node: HTMLSpanElement | null) => void;
+  draggable?: boolean;
+  dropHovered?: boolean;
   edge: Edge;
   hideMoveIndicator?: boolean;
   indicatorRef?: (node: HTMLSpanElement | null) => void;
   label: string;
+  onDrag?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: () => void;
+  onDragLeave?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
   onClick?: () => void;
   rotateLabel?: boolean;
   selected?: boolean;
@@ -3498,15 +4169,37 @@ function Dock({
         `dock--state-${state}`,
         selected ? 'dock--status-selected' : 'dock--status-default',
         onClick ? 'dock--interactive' : '',
+        draggable ? 'dock--draggable' : '',
+        onDrop ? 'dock--drop-target' : '',
+        dropHovered ? 'dock--drop-hovered' : '',
       ]
         .filter(Boolean)
         .join(' ')}
       ref={spaceRef}
+      draggable={draggable}
       onClick={(event) => {
         if (onClick) {
           event.stopPropagation();
           onClick();
         }
+      }}
+      onDragEnd={() => {
+        onDragEnd?.();
+      }}
+      onDrag={(event) => {
+        onDrag?.(event);
+      }}
+      onDragOver={(event) => {
+        onDragOver?.(event);
+      }}
+      onDragLeave={(event) => {
+        onDragLeave?.(event);
+      }}
+      onDragStart={(event) => {
+        onDragStart?.(event);
+      }}
+      onDrop={(event) => {
+        onDrop?.(event);
       }}
       onMouseDown={(event) => {
         if (onClick) {
@@ -3525,7 +4218,11 @@ function Dock({
           </span>
         </div>
         <div className="dock__body">
-          {trailerNumber ? <span className="dock__trailer">{trailerNumber}</span> : null}
+          {trailerNumber ? (
+            <span className={['dock__trailer', rotateLabel ? 'dock__trailer--rotated' : ''].filter(Boolean).join(' ')}>
+              {trailerNumber}
+            </span>
+          ) : null}
           {state === 'move-task' ? (
             <span
               className={[
@@ -3541,6 +4238,9 @@ function Dock({
               ↓
             </span>
           ) : null}
+          {state === 'move-task' ? (
+            <span aria-hidden="true" className="dock__curve-control" ref={controlRef} />
+          ) : null}
         </div>
       </div>
     </div>
@@ -3549,12 +4249,18 @@ function Dock({
 
 function ParkingRowView({
   appMode,
+  draggedSpaceKey,
   isPreview,
   onHandleStart,
   onMoveStart,
+  onSpaceDragEnd,
+  onSpaceDragMove,
+  onSpaceDragStart,
+  onSpaceDragPreview,
   onSelect,
   onSpaceSelect,
   operationsAssignments,
+  registerSpaceControlRef,
   registerSpaceIndicatorRef,
   registerSpaceRef,
   row,
@@ -3564,12 +4270,23 @@ function ParkingRowView({
   selectedSpaceKey,
 }: {
   appMode: AppMode;
+  draggedSpaceKey: string | null;
   isPreview: boolean;
   onHandleStart: (event: React.MouseEvent<HTMLButtonElement>, row: ParkingRow, handle: 'start' | 'end') => void;
   onMoveStart: (event: React.MouseEvent<HTMLDivElement>, row: ParkingRow) => void;
+  onSpaceDragEnd: () => void;
+  onSpaceDragMove: (event: React.DragEvent<HTMLDivElement>) => void;
+  onSpaceDragStart: (
+    spaceKey: string,
+    sourceEdge: Edge,
+    sourceAngle: number,
+    pointer: { x: number; y: number }
+  ) => boolean;
+  onSpaceDragPreview: (event: React.DragEvent<HTMLDivElement>) => void;
   onSelect: () => void;
   onSpaceSelect: (spaceKey: string) => void;
   operationsAssignments: OperationsAssignments;
+  registerSpaceControlRef: (spaceKey: string, node: HTMLSpanElement | null) => void;
   registerSpaceIndicatorRef: (spaceKey: string, node: HTMLSpanElement | null) => void;
   registerSpaceRef: (spaceKey: string, node: HTMLDivElement | null) => void;
   row: ParkingRow;
@@ -3644,14 +4361,35 @@ function ParkingRowView({
 
               return (
                 <Dock
+                  controlRef={(node) => registerSpaceControlRef(spaceKey, node)}
+                  draggable={appMode === 'operations' && assignment?.type === 'yard' && Boolean(assignment?.trailer)}
                   edge={rowEdge}
                   hideMoveIndicator={selectedMoveTaskSpaceKeys.has(spaceKey)}
                   indicatorRef={(node) => registerSpaceIndicatorRef(spaceKey, node)}
                   key={`${row.id}-${slot}`}
                   label={slot}
+                  onDrag={onSpaceDragMove}
+                  onDragEnd={onSpaceDragEnd}
+                  onDragStart={(event) => {
+                    const allowed = onSpaceDragStart(spaceKey, rowEdge, metrics.angle, {
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+
+                    if (!allowed) {
+                      event.preventDefault();
+                      return;
+                    }
+
+                    event.stopPropagation();
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', spaceKey);
+                    onSpaceDragPreview(event);
+                  }}
                   onClick={appMode === 'operations' ? () => onSpaceSelect(spaceKey) : undefined}
                   rotateLabel={row.settings.rotateLabels}
                   selected={
+                    draggedSpaceKey === spaceKey ||
                     selectedSpaceKey === spaceKey ||
                     (selectedMoveTaskTrailerNumber !== null &&
                       assignment?.state === 'move-task' &&
