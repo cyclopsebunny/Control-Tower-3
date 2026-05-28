@@ -1152,16 +1152,15 @@
   flex-direction: column;
   justify-content: flex-start;
   width: auto;
-  min-width: 86px;
   height: max-content;
 }
 
 .dock {
   position: relative;
   display: flex;
-  flex: 0 0 32px;
-  width: 32px;
-  height: 86px;
+  flex: 0 0 var(--dock-w, 32px);
+  width: var(--dock-w, 32px);
+  height: calc(16px + var(--dock-d, 70px));
   overflow: visible;
   user-select: none;
 }
@@ -1183,14 +1182,14 @@
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-end;
-  width: 32px;
-  height: 86px;
+  width: var(--dock-w, 32px);
+  height: calc(16px + var(--dock-d, 70px));
   overflow: visible;
   border-radius: 4px;
 }
 
 .dock--top {
-  flex-basis: 32px;
+  flex-basis: var(--dock-w, 32px);
 }
 
 .dock--top .dock__inner {
@@ -1199,13 +1198,13 @@
 
 .dock--left,
 .dock--right {
-  width: 86px;
-  height: 32px;
+  width: calc(16px + var(--dock-d, 70px));
+  height: var(--dock-w, 32px);
 }
 
 .dock-strip__dock-row--edge-left .dock,
 .dock-strip__dock-row--edge-right .dock {
-  flex: 0 0 32px;
+  flex: 0 0 var(--dock-w, 32px);
 }
 
 .dock--left .dock__inner,
@@ -1231,7 +1230,7 @@
 .dock__head {
   position: relative;
   z-index: 2;
-  width: 32px;
+  width: var(--dock-w, 32px);
   height: 16px;
   background: #ffffff;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.15);
@@ -1287,8 +1286,8 @@
 .dock__body {
   position: relative;
   z-index: 1;
-  width: 32px;
-  height: 70px;
+  width: var(--dock-w, 32px);
+  height: var(--dock-d, 70px);
   border-left: 1px dashed #a6a6a6;
   border-right: 1px dashed #a6a6a6;
   border-bottom: 1px dashed #a6a6a6;
@@ -1938,6 +1937,68 @@
   border-top-style: dashed;
 }
 
+.parking-row--lot-member .parking-row__line {
+  opacity: 1;
+  border-top-color: #003b5c;
+}
+
+.parking-row--lot-member .parking-row__slots {
+  filter: drop-shadow(0 0 0.35rem rgba(0, 59, 92, 0.35));
+}
+
+.parking-row--multi-selected .parking-row__line {
+  opacity: 1;
+  border-top-color: #003b5c;
+  border-top-style: dashed;
+}
+
+.parking-row--multi-selected .parking-row__slots {
+  filter: drop-shadow(0 0 0.35rem rgba(0, 59, 92, 0.25));
+}
+
+.lot-frame {
+  position: absolute;
+  z-index: 0;
+  border: 1px dashed rgba(0, 59, 92, 0.55);
+  border-radius: 6px;
+  background: rgba(0, 59, 92, 0.05);
+  cursor: grab;
+}
+
+.lot-frame--selected {
+  background: rgba(0, 59, 92, 0.08);
+  border-color: rgba(0, 59, 92, 0.75);
+}
+
+.lot-label,
+.row-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  color: #b5b5b5;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 19px;
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+  z-index: 2;
+}
+
+.lot-label--active,
+.row-label--active {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #003b5c;
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.lot-label:active,
+.row-label:active {
+  cursor: grabbing;
+}
+
 .details-panel {
   display: flex;
   flex-direction: column;
@@ -2114,6 +2175,10 @@
 
 .field-grid--three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.field-grid--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .toggle-row {
