@@ -1649,6 +1649,10 @@ function App() {
   const [newViewName, setNewViewName] = useState('');
   const viewSeqRef = useRef(0);
   const viewsRef = useRef<HTMLDivElement | null>(null);
+  // Briefly true while a saved-view recall is animating, so the canvas transform
+  // eases to the new framing. Manual pan/zoom never sets this, so it stays instant.
+  const [isViewTransitioning, setIsViewTransitioning] = useState(false);
+  const viewTransitionTimerRef = useRef<number | null>(null);
   const [buildingSettings, setBuildingSettings] = useState(buildingDefaults);
   const [dockSettings, setDockSettings] = useState(dockDefaults);
   const [rowSettings, setRowSettings] = useState(rowDefaults);
@@ -1809,6 +1813,15 @@ function App() {
     window.addEventListener('mousedown', handlePointerDown);
     return () => window.removeEventListener('mousedown', handlePointerDown);
   }, [viewMenuOpen]);
+
+  useEffect(
+    () => () => {
+      if (viewTransitionTimerRef.current !== null) {
+        window.clearTimeout(viewTransitionTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     return () => {
@@ -3082,11 +3095,25 @@ function App() {
     };
   };
 
+  // Enable the eased transform transition for one recall, then turn it back off
+  // (slightly after the CSS duration) so subsequent pan/zoom stays instant.
+  const startViewTransition = () => {
+    setIsViewTransitioning(true);
+    if (viewTransitionTimerRef.current !== null) {
+      window.clearTimeout(viewTransitionTimerRef.current);
+    }
+    viewTransitionTimerRef.current = window.setTimeout(() => {
+      setIsViewTransitioning(false);
+      viewTransitionTimerRef.current = null;
+    }, 480);
+  };
+
   const recallView = (view: SavedView) => {
     const nextViewport = computeViewportForBounds(view.bounds);
     if (!nextViewport) {
       return;
     }
+    startViewTransition();
     setViewport(nextViewport);
     setSelectedViewName(view.name);
     setSelectedViewId(view.id);
@@ -3098,6 +3125,7 @@ function App() {
     const nextViewport =
       (defaultViewBounds ? computeViewportForBounds(defaultViewBounds) : null) ??
       { scale: 1, x: 0, y: 0 };
+    startViewTransition();
     setViewport(nextViewport);
     setSelectedViewName('Default View');
     setSelectedViewId('default');
@@ -6192,7 +6220,12 @@ function App() {
               ref={canvasRef}
             >
               <div
-                className="canvas-world"
+                className={[
+                  'canvas-world',
+                  isViewTransitioning ? 'canvas-world--animating' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 style={{
                   transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
                   transformOrigin: 'top left',

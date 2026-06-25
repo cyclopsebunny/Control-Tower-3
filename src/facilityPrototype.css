@@ -508,6 +508,11 @@
   will-change: transform;
 }
 
+/* Eased glide when recalling a saved view (only applied during recall). */
+.canvas-world--animating {
+  transition: transform 450ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .canvas-dropzone--drawing .building-card,
 .canvas-dropzone--drawing .parking-row {
   pointer-events: none;
