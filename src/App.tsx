@@ -270,6 +270,39 @@ type CanvasPan = {
   startY: number;
 };
 
+// Geometry frozen at the start of a minimap drag so the world<->minimap
+// mapping (and the rendered minimap box) stays stable while the viewport pans
+// underneath it. Without freezing, the domain would grow as the viewport moves
+// past the content, rescaling the minimap mid-drag and making it feel twitchy.
+type MinimapDrag = {
+  domainMinX: number;
+  domainMinY: number;
+  scaleFactor: number;
+  mapWidth: number;
+  mapHeight: number;
+  worldScale: number;
+  paddingLeft: number;
+  paddingTop: number;
+  grabDx: number;
+  grabDy: number;
+};
+
+type CanvasMetrics = {
+  width: number;
+  height: number;
+  paddingLeft: number;
+  paddingTop: number;
+};
+
+// A user-saved camera position. We store the world-space region that was
+// visible (not the raw scale/offset) so recall can re-fit it to the current
+// container size and keep everything in the view visible regardless of resize.
+type SavedView = {
+  id: string;
+  name: string;
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
+};
+
 type CanvasSnapshot = {
   id: string;
   name: string;
@@ -280,6 +313,7 @@ type CanvasSnapshot = {
   rows: ParkingRow[];
   lots?: Lot[];
   viewport: CanvasViewport;
+  savedViews?: SavedView[];
   idCounter: number;
 };
 
@@ -292,6 +326,7 @@ type FacilityDocument = {
   rows: ParkingRow[];
   lots?: Lot[];
   viewport: CanvasViewport;
+  savedViews?: SavedView[];
   // Multi-canvas support (remote locations).
   canvasLocations?: CanvasSnapshot[];
   activeCanvasId?: string;
@@ -1444,11 +1479,28 @@ function App() {
     </svg>
   );
 
-  const ZoomResetIcon = () => (
-    <svg aria-hidden="true" className="canvas-viewport-controls__glyph-svg" viewBox="0 0 24 24">
+  const ViewCaretIcon = () => (
+    <svg aria-hidden="true" className="canvas-views__caret-svg" viewBox="0 0 24 24">
       <path
-        d="M20.1318 12.4719C19.5618 12.4179 19.0898 12.8139 19.0328 13.3619C18.8578 15.0239 18.1408 16.5289 16.9548 17.7159C14.1358 20.5319 9.5518 20.5319 6.7348 17.7159C3.9168 14.8969 3.9168 10.3129 6.7348 7.49489C9.2088 5.02189 13.0428 4.72089 15.8498 6.59089L14.1268 8.31489C13.9568 8.48489 14.0578 8.77489 14.2958 8.80389L20.0568 9.50289C20.2418 9.52589 20.3998 9.36789 20.3768 9.18289L19.6788 3.42189C19.6498 3.18289 19.3588 3.08289 19.1888 3.25289L17.2798 5.16189C13.6728 2.52689 8.5758 2.82589 5.3208 6.08089C1.7238 9.67889 1.7238 15.5319 5.3208 19.1299C7.1198 20.9289 9.4818 21.8269 11.8448 21.8269C14.2078 21.8269 16.5698 20.9279 18.3688 19.1299C19.8608 17.6379 20.8028 15.6629 21.0208 13.5709C21.0788 13.0209 20.6808 12.5299 20.1318 12.4719Z"
-        fill="currentColor"
+        d="M6 15l6-6 6 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const TrashIcon = () => (
+    <svg aria-hidden="true" className="canvas-views__trash-svg" viewBox="0 0 24 24">
+      <path
+        d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
@@ -1555,7 +1607,26 @@ function App() {
   const isCapturingCanvasPreviewRef = useRef(false);
   const [viewport, setViewport] = useState<CanvasViewport>({ scale: 1, x: 0, y: 0 });
   const [canvasPan, setCanvasPan] = useState<CanvasPan | null>(null);
+  // Armed on a left-mousedown over empty canvas; promoted to a real pan once
+  // the pointer moves past a small threshold (so a plain click still deselects).
+  const pendingPanRef = useRef<CanvasPan | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
+  const [canvasMetrics, setCanvasMetrics] = useState<CanvasMetrics>({
+    width: 0,
+    height: 0,
+    paddingLeft: 22,
+    paddingTop: 70,
+  });
+  const minimapRef = useRef<HTMLDivElement | null>(null);
+  const minimapDragRef = useRef<MinimapDrag | null>(null);
+  const [isMinimapDragging, setIsMinimapDragging] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [selectedViewName, setSelectedViewName] = useState('Default View');
+  const [addViewModalOpen, setAddViewModalOpen] = useState(false);
+  const [newViewName, setNewViewName] = useState('');
+  const viewSeqRef = useRef(0);
+  const viewsRef = useRef<HTMLDivElement | null>(null);
   const [buildingSettings, setBuildingSettings] = useState(buildingDefaults);
   const [dockSettings, setDockSettings] = useState(dockDefaults);
   const [rowSettings, setRowSettings] = useState(rowDefaults);
@@ -1593,6 +1664,129 @@ function App() {
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
+
+  // Track the canvas viewport size (and padding) so the minimap can map world
+  // coordinates without relying on a live getBoundingClientRect during render.
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) {
+      return;
+    }
+
+    const update = () => {
+      const styles = window.getComputedStyle(el);
+      const next = {
+        width: el.clientWidth,
+        height: el.clientHeight,
+        paddingLeft: parseFloat(styles.paddingLeft || '0'),
+        paddingTop: parseFloat(styles.paddingTop || '0'),
+      };
+      // Bail out when nothing actually changed so an unchanged observer
+      // callback can never feed back into another render.
+      setCanvasMetrics((prev) =>
+        prev.width === next.width &&
+        prev.height === next.height &&
+        prev.paddingLeft === next.paddingLeft &&
+        prev.paddingTop === next.paddingTop
+          ? prev
+          : next,
+      );
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, []);
+
+  // While dragging the minimap viewport rectangle, follow the pointer anywhere
+  // on the page until the mouse is released.
+  useEffect(() => {
+    if (!isMinimapDragging) {
+      return;
+    }
+
+    const handleMove = (event: MouseEvent) => applyMinimapPan(event.clientX, event.clientY);
+    const handleUp = () => {
+      minimapDragRef.current = null;
+      setIsMinimapDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [isMinimapDragging]);
+
+  // Wheel / trackpad-pinch zoom. Attached as a NON-passive native listener
+  // rather than React's onWheel (which React registers as passive, so its
+  // preventDefault is ignored). Calling preventDefault here stops the browser
+  // from hijacking pinch gestures as full-page zoom in Chrome.
+  useEffect(() => {
+    const el = canvasAreaRef.current;
+    if (!el) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+
+      const bounds = canvasRef.current?.getBoundingClientRect();
+      if (!bounds) {
+        return;
+      }
+
+      // Normalize the delta so line/page-based wheels behave like pixel-based
+      // ones (trackpads).
+      let delta = event.deltaY;
+      if (event.deltaMode === 1) {
+        delta *= 16; // lines -> ~px
+      } else if (event.deltaMode === 2) {
+        delta *= window.innerHeight || 800; // pages -> ~px
+      }
+
+      // Proportional zoom step (gentle for small trackpad gestures); the clamp
+      // keeps a single fast flick from leaping.
+      const clampedDelta = Math.max(-100, Math.min(100, delta));
+      const zoomFactor = Math.exp(-clampedDelta * 0.0009);
+      const mouseX = event.clientX - bounds.left;
+      const mouseY = event.clientY - bounds.top;
+
+      setViewport((current) => {
+        const clampedScale = Math.max(0.35, Math.min(current.scale * zoomFactor, 2.5));
+        const worldX = (mouseX - current.x) / current.scale;
+        const worldY = (mouseY - current.y) / current.scale;
+        return {
+          scale: clampedScale,
+          x: mouseX - worldX * clampedScale,
+          y: mouseY - worldY * clampedScale,
+        };
+      });
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  // Close the saved-views dropdown when clicking anywhere outside of it.
+  useEffect(() => {
+    if (!viewMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (viewsRef.current && !viewsRef.current.contains(event.target as Node)) {
+        setViewMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [viewMenuOpen]);
 
   useEffect(() => {
     return () => {
@@ -1681,6 +1875,7 @@ function App() {
     rows,
     lots,
     viewport,
+    savedViews,
 
     // New (multi-canvas) fields.
     activeCanvasId,
@@ -1703,6 +1898,7 @@ function App() {
         rows,
         lots,
         viewport,
+        savedViews,
         idCounter: idRef.current,
       },
       ...remoteCanvasSnapshots.map((snapshot) => ({
@@ -1808,6 +2004,9 @@ function App() {
     setCanvasBackgroundColor('#eaeaea');
     setCanvasLocationName('Location 1');
     setViewport({ scale: 1, x: 0, y: 0 });
+    setSavedViews([]);
+    setSelectedViewName('Default View');
+    setViewMenuOpen(false);
     idRef.current = 1;
     setSelection(null);
     setBuildingSettings(buildingDefaults);
@@ -1865,6 +2064,7 @@ function App() {
           rows: Array.isArray(loc.rows) ? loc.rows : [],
           lots: Array.isArray(loc.lots) ? loc.lots : [],
           viewport: loc.viewport ?? { scale: 1, x: 0, y: 0 },
+          savedViews: Array.isArray(loc.savedViews) ? loc.savedViews : [],
           operationsAssignments: applyDockDoorBindingsToAssignments(
             loc.operationsAssignments ?? {},
             loc.dockDoorEnabledBySpaceKey ?? {}
@@ -1893,6 +2093,8 @@ function App() {
         setRows(nextActive.rows);
         setLots(nextActive.lots ?? []);
         setViewport(nextActive.viewport);
+        setSavedViews(nextActive.savedViews ?? []);
+        setSelectedViewName('Default View');
         setOperationsAssignments(
           nextMode === 'operations'
             ? Object.keys(nextActive.operationsAssignments ?? {}).length > 0
@@ -1944,6 +2146,8 @@ function App() {
         setRows(nextRows);
         setLots(nextLots);
         setViewport(doc.viewport ?? { scale: 1, x: 0, y: 0 });
+        setSavedViews(Array.isArray(doc.savedViews) ? doc.savedViews : []);
+        setSelectedViewName('Default View');
         idRef.current = typeof doc.idCounter === 'number' ? doc.idCounter : 1;
       }
 
@@ -2008,6 +2212,7 @@ function App() {
     rows,
     lots,
     viewport,
+    savedViews,
     idCounter: idRef.current,
   });
 
@@ -2025,6 +2230,8 @@ function App() {
     setRows(snapshot.rows);
     setLots(snapshot.lots ?? []);
     setViewport(snapshot.viewport);
+    setSavedViews(snapshot.savedViews ?? []);
+    setSelectedViewName('Default View');
     setOperationsAssignments(
       applyDockDoorBindingsToAssignments(snapshot.operationsAssignments, snapshot.dockDoorEnabledBySpaceKey ?? {})
     );
@@ -2096,6 +2303,7 @@ function App() {
     rows,
     lots,
     viewport,
+    savedViews,
     operationsAssignments,
   ]);
 
@@ -2156,6 +2364,9 @@ function App() {
     setLots([]);
     setOperationsAssignments({});
     setViewport({ scale: 1, x: 0, y: 0 });
+    setSavedViews([]);
+    setSelectedViewName('Default View');
+    setViewMenuOpen(false);
   };
 
   const handleDeleteActiveLocation = () => {
@@ -2790,6 +3001,181 @@ function App() {
     };
   };
 
+  // Freshest container size/padding, preferring a live measurement over the
+  // ResizeObserver-tracked value so recall fits to the current dimensions.
+  const getCanvasMetricsNow = (): CanvasMetrics => {
+    const el = canvasRef.current;
+    if (el) {
+      const styles = window.getComputedStyle(el);
+      return {
+        width: el.clientWidth,
+        height: el.clientHeight,
+        paddingLeft: parseFloat(styles.paddingLeft || '0'),
+        paddingTop: parseFloat(styles.paddingTop || '0'),
+      };
+    }
+    return canvasMetrics;
+  };
+
+  // Recall a saved view by fitting its stored world region into the current
+  // container (contain-fit + centered), so everything in the view is visible no
+  // matter how the map area has been resized since the view was saved.
+  const recallView = (view: SavedView) => {
+    const m = getCanvasMetricsNow();
+    const targetWidth = view.bounds.maxX - view.bounds.minX;
+    const targetHeight = view.bounds.maxY - view.bounds.minY;
+    if (m.width <= 0 || m.height <= 0 || targetWidth <= 0 || targetHeight <= 0) {
+      return;
+    }
+
+    const fitScale = Math.min(m.width / targetWidth, m.height / targetHeight);
+    const scale = Math.max(0.35, Math.min(fitScale, 2.5));
+    const centerX = (view.bounds.minX + view.bounds.maxX) / 2;
+    const centerY = (view.bounds.minY + view.bounds.maxY) / 2;
+
+    setViewport({
+      scale,
+      x: m.width / 2 - m.paddingLeft - centerX * scale,
+      y: m.height / 2 - m.paddingTop - centerY * scale,
+    });
+    setSelectedViewName(view.name);
+    setViewMenuOpen(false);
+  };
+
+  const recallDefaultView = () => {
+    setViewport({ scale: 1, x: 0, y: 0 });
+    setSelectedViewName('Default View');
+    setViewMenuOpen(false);
+  };
+
+  const handleToggleViewMenu = () => {
+    setViewMenuOpen((current) => {
+      const next = !current;
+      if (next) {
+        setAddMenuOpen(false);
+        setMoreMenuOpen(false);
+      }
+      return next;
+    });
+  };
+
+  const handleOpenAddViewModal = () => {
+    setViewMenuOpen(false);
+    setNewViewName('');
+    setAddViewModalOpen(true);
+  };
+
+  const handleCancelAddView = () => {
+    setAddViewModalOpen(false);
+    setNewViewName('');
+  };
+
+  const handleConfirmAddView = () => {
+    const name = newViewName.trim();
+    if (!name) {
+      return;
+    }
+
+    const bounds = getVisibleWorldBounds();
+    if (!bounds) {
+      return;
+    }
+
+    const view: SavedView = {
+      id: `view-${Date.now().toString(36)}-${viewSeqRef.current++}`,
+      name,
+      bounds: {
+        minX: bounds.minX,
+        minY: bounds.minY,
+        maxX: bounds.maxX,
+        maxY: bounds.maxY,
+      },
+    };
+
+    setSavedViews((current) => [...current, view]);
+    setSelectedViewName(name);
+    setAddViewModalOpen(false);
+    setNewViewName('');
+  };
+
+  const handleDeleteView = (id: string) => {
+    const removed = savedViews.find((view) => view.id === id);
+    setSavedViews((current) => current.filter((view) => view.id !== id));
+    if (removed && removed.name === selectedViewName) {
+      setSelectedViewName('Default View');
+    }
+  };
+
+  // True when a mousedown landed on empty canvas (the dropzone/world/placeholder)
+  // rather than a building, row, label, or other draggable element.
+  const isCanvasBackgroundTarget = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    if (target === canvasRef.current) {
+      return true;
+    }
+    return (
+      target.classList.contains('canvas-world') ||
+      target.classList.contains('canvas-dropzone') ||
+      target.classList.contains('canvas-placeholder')
+    );
+  };
+
+  // Bounding box (world coordinates) of everything drawn on the canvas.
+  const getContentWorldBounds = () => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    buildings.forEach((building) => {
+      minX = Math.min(minX, building.rect.x);
+      minY = Math.min(minY, building.rect.y);
+      maxX = Math.max(maxX, building.rect.x + building.rect.width);
+      maxY = Math.max(maxY, building.rect.y + building.rect.height);
+    });
+
+    rows.forEach((row) => {
+      const aabb = computeLotAABB({ rowIds: [row.id] }, rows);
+      if (!aabb) {
+        return;
+      }
+      minX = Math.min(minX, aabb.x);
+      minY = Math.min(minY, aabb.y);
+      maxX = Math.max(maxX, aabb.x + aabb.width);
+      maxY = Math.max(maxY, aabb.y + aabb.height);
+    });
+
+    if (!Number.isFinite(minX)) {
+      return null;
+    }
+
+    return { minX, minY, maxX, maxY };
+  };
+
+  // Translate a pointer position over the minimap into a canvas pan, keeping the
+  // grabbed point of the viewport rectangle under the cursor.
+  const applyMinimapPan = (clientX: number, clientY: number) => {
+    const drag = minimapDragRef.current;
+    const minimap = minimapRef.current;
+    if (!drag || !minimap) {
+      return;
+    }
+
+    const rect = minimap.getBoundingClientRect();
+    const rectLeftPx = clientX - rect.left - drag.grabDx;
+    const rectTopPx = clientY - rect.top - drag.grabDy;
+    const newVisibleMinX = drag.domainMinX + rectLeftPx / drag.scaleFactor;
+    const newVisibleMinY = drag.domainMinY + rectTopPx / drag.scaleFactor;
+
+    setViewport((current) => ({
+      ...current,
+      x: -drag.paddingLeft - newVisibleMinX * drag.worldScale,
+      y: -drag.paddingTop - newVisibleMinY * drag.worldScale,
+    }));
+  };
+
   const normalizeRect = (
     start: { x: number; y: number },
     end: { x: number; y: number }
@@ -2917,34 +3303,24 @@ function App() {
     };
   };
 
-  const zoomCanvasAtPoint = (clientX: number, clientY: number, nextScale: number) => {
-    const bounds = canvasRef.current?.getBoundingClientRect();
 
-    if (!bounds) {
+  const handleCanvasMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    // Promote an armed left-button press into a pan once the pointer has moved
+    // enough to count as a drag rather than a click.
+    if (!canvasPan && pendingPanRef.current) {
+      const pending = pendingPanRef.current;
+      const dx = event.clientX - pending.startClientX;
+      const dy = event.clientY - pending.startClientY;
+
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+        pendingPanRef.current = null;
+        skipCanvasClickRef.current = true;
+        setCanvasPan(pending);
+        setViewport({ ...viewport, x: pending.startX + dx, y: pending.startY + dy });
+      }
       return;
     }
 
-    const clampedScale = Math.max(0.35, Math.min(nextScale, 2.5));
-    const mouseX = clientX - bounds.left;
-    const mouseY = clientY - bounds.top;
-    const worldX = (mouseX - viewport.x) / viewport.scale;
-    const worldY = (mouseY - viewport.y) / viewport.scale;
-
-    setViewport({
-      scale: clampedScale,
-      x: mouseX - worldX * clampedScale,
-      y: mouseY - worldY * clampedScale,
-    });
-  };
-
-  const handleCanvasWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    event.preventDefault();
-
-    const zoomFactor = event.deltaY < 0 ? 1.1 : 0.9;
-    zoomCanvasAtPoint(event.clientX, event.clientY, viewport.scale * zoomFactor);
-  };
-
-  const handleCanvasMove = (event: React.MouseEvent<HTMLDivElement>) => {
     if (canvasPan) {
       setViewport({
         ...viewport,
@@ -3307,6 +3683,7 @@ function App() {
   };
 
   const handleCanvasLeave = () => {
+    pendingPanRef.current = null;
     setCanvasPan(null);
     setBuildingDrag(null);
     setBuildingResize(null);
@@ -3326,6 +3703,7 @@ function App() {
   };
 
   const handleCanvasMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
+    pendingPanRef.current = null;
     setCanvasPan(null);
     setBuildingDrag(null);
     setBuildingResize(null);
@@ -5554,14 +5932,33 @@ function App() {
                       <button className="action-menu__item" onClick={handleSaveDocument} type="button">
                         Save
                       </button>
-                      <button className="action-menu__item" onClick={() => handleModeChange('build')} type="button">
+                      <button
+                        className="action-menu__item"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          handleModeChange('build');
+                        }}
+                        type="button"
+                      >
                         Edit
                       </button>
                     </>
                   ) : (
-                    <button className="action-menu__item" onClick={handleSaveDocument} type="button">
-                      Save
-                    </button>
+                    <>
+                      <button className="action-menu__item" onClick={handleSaveDocument} type="button">
+                        Save
+                      </button>
+                      <button
+                        className="action-menu__item"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          handleModeChange('operations');
+                        }}
+                        type="button"
+                      >
+                        Operations
+                      </button>
+                    </>
                   )}
                   <button className="action-menu__item" onClick={handleSaveAsDocument} type="button">
                     Save As
@@ -5585,12 +5982,12 @@ function App() {
               buildingDrag ? 'canvas-area--dragging' : '',
               buildingResize ? 'canvas-area--resizing' : '',
               canvasPan || spacePressed ? 'canvas-area--panning' : '',
+              canvasPan ? 'canvas-area--grabbing' : '',
             ]
               .filter(Boolean)
               .join(' ')}
             ref={canvasAreaRef}
             style={{ background: canvasBackgroundColor }}
-            onWheel={handleCanvasWheel}
             onMouseLeave={handleCanvasLeave}
             onMouseMove={handleCanvasMove}
             onMouseUp={handleCanvasMouseUp}
@@ -5661,6 +6058,25 @@ function App() {
                     startX: viewport.x,
                     startY: viewport.y,
                   });
+                  return;
+                }
+
+                // Left-button on empty canvas: arm a drag-to-pan. It only
+                // becomes a pan once the pointer moves (see handleCanvasMove),
+                // so a plain click still falls through to deselect.
+                if (
+                  event.button === 0 &&
+                  !isDrawingBuilding &&
+                  !isDrawingRow &&
+                  !selectingEdge &&
+                  isCanvasBackgroundTarget(event.target)
+                ) {
+                  pendingPanRef.current = {
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                    startX: viewport.x,
+                    startY: viewport.y,
+                  };
                   return;
                 }
 
@@ -6310,8 +6726,166 @@ function App() {
               </div>
             </div>
 
+            {(() => {
+              if (isCanvasPreviewCaptureMode) {
+                return null;
+              }
+
+              const contentBounds = getContentWorldBounds();
+              if (!contentBounds || canvasMetrics.width <= 0) {
+                return null;
+              }
+
+              const { paddingLeft, paddingTop, width, height } = canvasMetrics;
+              const visible = {
+                minX: (-paddingLeft - viewport.x) / viewport.scale,
+                minY: (-paddingTop - viewport.y) / viewport.scale,
+                maxX: (width - paddingLeft - viewport.x) / viewport.scale,
+                maxY: (height - paddingTop - viewport.y) / viewport.scale,
+              };
+
+              // While a drag is in progress, reuse the geometry captured at its
+              // start so the minimap does not rescale/reposition underneath the
+              // pointer. Only the viewport rectangle moves, 1:1 with the cursor.
+              const frozen = isMinimapDragging ? minimapDragRef.current : null;
+
+              let domainMinX: number;
+              let domainMinY: number;
+              let scaleFactor: number;
+              let mapW: number;
+              let mapH: number;
+
+              if (frozen) {
+                domainMinX = frozen.domainMinX;
+                domainMinY = frozen.domainMinY;
+                scaleFactor = frozen.scaleFactor;
+                mapW = frozen.mapWidth;
+                mapH = frozen.mapHeight;
+              } else {
+                // Minimap domain spans everything drawn plus the current viewport,
+                // so the viewport rectangle stays in view even when panned away.
+                const rawMinX = Math.min(contentBounds.minX, visible.minX);
+                const rawMinY = Math.min(contentBounds.minY, visible.minY);
+                const rawMaxX = Math.max(contentBounds.maxX, visible.maxX);
+                const rawMaxY = Math.max(contentBounds.maxY, visible.maxY);
+                const padX = (rawMaxX - rawMinX) * 0.06 || 24;
+                const padY = (rawMaxY - rawMinY) * 0.06 || 24;
+                const domainW = rawMaxX - rawMinX + padX * 2;
+                const domainH = rawMaxY - rawMinY + padY * 2;
+                if (domainW <= 0 || domainH <= 0) {
+                  return null;
+                }
+
+                const MAX_W = 200;
+                const MAX_H = 150;
+                domainMinX = rawMinX - padX;
+                domainMinY = rawMinY - padY;
+                scaleFactor = Math.min(MAX_W / domainW, MAX_H / domainH);
+                mapW = domainW * scaleFactor;
+                mapH = domainH * scaleFactor;
+              }
+
+              const toMapX = (worldX: number) => (worldX - domainMinX) * scaleFactor;
+              const toMapY = (worldY: number) => (worldY - domainMinY) * scaleFactor;
+
+              const viewRect = {
+                left: toMapX(visible.minX),
+                top: toMapY(visible.minY),
+                width: (visible.maxX - visible.minX) * scaleFactor,
+                height: (visible.maxY - visible.minY) * scaleFactor,
+              };
+
+              const handleMinimapDown = (event: React.MouseEvent<HTMLDivElement>) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const localX = event.clientX - rect.left;
+                const localY = event.clientY - rect.top;
+                const insideRect =
+                  localX >= viewRect.left &&
+                  localX <= viewRect.left + viewRect.width &&
+                  localY >= viewRect.top &&
+                  localY <= viewRect.top + viewRect.height;
+                minimapDragRef.current = {
+                  domainMinX,
+                  domainMinY,
+                  scaleFactor,
+                  mapWidth: mapW,
+                  mapHeight: mapH,
+                  worldScale: viewport.scale,
+                  paddingLeft,
+                  paddingTop,
+                  grabDx: insideRect ? localX - viewRect.left : viewRect.width / 2,
+                  grabDy: insideRect ? localY - viewRect.top : viewRect.height / 2,
+                };
+                setIsMinimapDragging(true);
+                applyMinimapPan(event.clientX, event.clientY);
+              };
+
+              return (
+                <div className="canvas-minimap" title="Map overview — drag the box to pan">
+                  <div
+                    className={[
+                      'canvas-minimap__canvas',
+                      isMinimapDragging ? 'canvas-minimap__canvas--dragging' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    ref={minimapRef}
+                    onMouseDown={handleMinimapDown}
+                    style={{ width: `${mapW}px`, height: `${mapH}px` }}
+                  >
+                    {rows.map((row) => {
+                      const aabb = computeLotAABB({ rowIds: [row.id] }, rows);
+                      if (!aabb) {
+                        return null;
+                      }
+                      return (
+                        <div
+                          key={`mm-row-${row.id}`}
+                          className="canvas-minimap__row"
+                          style={{
+                            left: `${toMapX(aabb.x)}px`,
+                            top: `${toMapY(aabb.y)}px`,
+                            width: `${Math.max(1, aabb.width * scaleFactor)}px`,
+                            height: `${Math.max(1, aabb.height * scaleFactor)}px`,
+                          }}
+                        />
+                      );
+                    })}
+                    {buildings.map((building) => (
+                      <div
+                        key={`mm-building-${building.id}`}
+                        className="canvas-minimap__building"
+                        style={{
+                          left: `${toMapX(building.rect.x)}px`,
+                          top: `${toMapY(building.rect.y)}px`,
+                          width: `${Math.max(1, building.rect.width * scaleFactor)}px`,
+                          height: `${Math.max(1, building.rect.height * scaleFactor)}px`,
+                        }}
+                      />
+                    ))}
+                    <div
+                      className="canvas-minimap__viewport"
+                      style={{
+                        left: `${viewRect.left}px`,
+                        top: `${viewRect.top}px`,
+                        width: `${Math.max(6, viewRect.width)}px`,
+                        height: `${Math.max(6, viewRect.height)}px`,
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
             <div
-              className="canvas-viewport-controls"
+              className={[
+                'canvas-viewport-controls',
+                viewMenuOpen ? 'canvas-viewport-controls--menu-open' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
               style={isCanvasPreviewCaptureMode ? { display: 'none' } : undefined}
             >
               <button
@@ -6339,18 +6913,73 @@ function App() {
                   </span>
                 </span>
               </button>
-              <button
-                className="canvas-viewport-controls__reset-button"
-                onClick={() => setViewport({ scale: 1, x: 0, y: 0 })}
-                type="button"
-              >
-                <span className="canvas-viewport-controls__reset-icon-container" aria-hidden="true">
-                  <span className="canvas-viewport-controls__glyph canvas-viewport-controls__glyph--reset">
-                    <ZoomResetIcon />
+              <div className="canvas-views" ref={viewsRef}>
+                {viewMenuOpen ? (
+                  <div className="canvas-views__menu" role="menu">
+                    {savedViews.map((view) => (
+                      <div className="canvas-views__menu-item" key={view.id}>
+                        <button
+                          className="canvas-views__menu-label"
+                          onClick={() => recallView(view)}
+                          type="button"
+                          role="menuitem"
+                        >
+                          {view.name}
+                        </button>
+                        <button
+                          className="canvas-views__menu-delete"
+                          onClick={() => handleDeleteView(view.id)}
+                          type="button"
+                          aria-label={`Delete ${view.name}`}
+                          title={`Delete ${view.name}`}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="canvas-views__menu-item">
+                      <button
+                        className="canvas-views__menu-label"
+                        onClick={recallDefaultView}
+                        type="button"
+                        role="menuitem"
+                      >
+                        Default View
+                      </button>
+                    </div>
+                    <div className="canvas-views__menu-item">
+                      <button
+                        className="canvas-views__menu-label canvas-views__menu-label--add"
+                        onClick={handleOpenAddViewModal}
+                        type="button"
+                        role="menuitem"
+                      >
+                        + Add View
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <button
+                  className="canvas-views__trigger"
+                  onClick={handleToggleViewMenu}
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={viewMenuOpen}
+                >
+                  <span className="canvas-views__trigger-label">{selectedViewName}</span>
+                  <span
+                    className={[
+                      'canvas-views__trigger-caret',
+                      viewMenuOpen ? 'canvas-views__trigger-caret--open' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    aria-hidden="true"
+                  >
+                    <ViewCaretIcon />
                   </span>
-                </span>
-                <span className="canvas-viewport-controls__reset-label">Reset</span>
-              </button>
+                </button>
+              </div>
             </div>
 
             <div
@@ -7411,6 +8040,59 @@ function App() {
           </footer>
         </aside>
       </section>
+      {addViewModalOpen ? (
+        <div className="dock-bindings-modal" role="dialog" aria-modal="true" aria-label="Save view">
+          <div className="dock-bindings-modal__backdrop" onClick={handleCancelAddView} />
+          <div className="dock-bindings-modal__panel">
+            <div className="dock-bindings-modal__header">
+              <h2 className="dock-bindings-modal__title">Save view</h2>
+              <button
+                className="dock-bindings-modal__close"
+                type="button"
+                aria-label="Close save view"
+                onClick={handleCancelAddView}
+              >
+                ×
+              </button>
+            </div>
+            <p className="dock-bindings-modal__description">
+              Name this view of the current pan &amp; zoom so you can return to it later.
+            </p>
+            <input
+              className="view-name-input"
+              type="text"
+              autoFocus
+              placeholder="View name"
+              value={newViewName}
+              onChange={(event) => setNewViewName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  handleConfirmAddView();
+                } else if (event.key === 'Escape') {
+                  handleCancelAddView();
+                }
+              }}
+            />
+            <div className="dock-bindings-modal__actions">
+              <button
+                className={['panel-button', 'panel-button--ghost'].join(' ')}
+                onClick={handleCancelAddView}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="panel-button"
+                onClick={handleConfirmAddView}
+                type="button"
+                disabled={!newViewName.trim()}
+              >
+                Save view
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {isDockBindingsModalOpen ? (
         <div className="dock-bindings-modal" role="dialog" aria-modal="true" aria-label="Create dock bindings">
           <div className="dock-bindings-modal__backdrop" onClick={handleDockBindingsCancel} />
