@@ -314,6 +314,7 @@ type CanvasSnapshot = {
   lots?: Lot[];
   viewport: CanvasViewport;
   savedViews?: SavedView[];
+  defaultViewBounds?: SavedView['bounds'] | null;
   idCounter: number;
 };
 
@@ -327,6 +328,7 @@ type FacilityDocument = {
   lots?: Lot[];
   viewport: CanvasViewport;
   savedViews?: SavedView[];
+  defaultViewBounds?: SavedView['bounds'] | null;
   // Multi-canvas support (remote locations).
   canvasLocations?: CanvasSnapshot[];
   activeCanvasId?: string;
@@ -1505,6 +1507,19 @@ function App() {
     </svg>
   );
 
+  const UpdateViewIcon = () => (
+    <svg aria-hidden="true" className="canvas-views__update-svg" viewBox="0 0 24 24">
+      <path
+        d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
   const DirectionalArrowIcon = ({ className }: { className?: string }) => (
     <svg aria-hidden="true" viewBox="0 0 24 24" className={className} xmlns="http://www.w3.org/2000/svg">
       <path
@@ -1623,6 +1638,13 @@ function App() {
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [selectedViewName, setSelectedViewName] = useState('Default View');
+  // Which view (if any) the user last recalled/saved, and the viewport that was
+  // applied for it. If the live viewport drifts from that baseline (pan/zoom),
+  // we offer to update the selected view. 'default' targets the Default View.
+  const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+  const [selectedViewBaseline, setSelectedViewBaseline] = useState<CanvasViewport | null>(null);
+  // Optional custom framing for the Default View (null = reset to 100%/origin).
+  const [defaultViewBounds, setDefaultViewBounds] = useState<SavedView['bounds'] | null>(null);
   const [addViewModalOpen, setAddViewModalOpen] = useState(false);
   const [newViewName, setNewViewName] = useState('');
   const viewSeqRef = useRef(0);
@@ -1876,6 +1898,7 @@ function App() {
     lots,
     viewport,
     savedViews,
+    defaultViewBounds,
 
     // New (multi-canvas) fields.
     activeCanvasId,
@@ -1899,6 +1922,7 @@ function App() {
         lots,
         viewport,
         savedViews,
+        defaultViewBounds,
         idCounter: idRef.current,
       },
       ...remoteCanvasSnapshots.map((snapshot) => ({
@@ -2005,7 +2029,10 @@ function App() {
     setCanvasLocationName('Location 1');
     setViewport({ scale: 1, x: 0, y: 0 });
     setSavedViews([]);
+    setDefaultViewBounds(null);
     setSelectedViewName('Default View');
+    setSelectedViewId(null);
+    setSelectedViewBaseline(null);
     setViewMenuOpen(false);
     idRef.current = 1;
     setSelection(null);
@@ -2065,6 +2092,7 @@ function App() {
           lots: Array.isArray(loc.lots) ? loc.lots : [],
           viewport: loc.viewport ?? { scale: 1, x: 0, y: 0 },
           savedViews: Array.isArray(loc.savedViews) ? loc.savedViews : [],
+          defaultViewBounds: loc.defaultViewBounds ?? null,
           operationsAssignments: applyDockDoorBindingsToAssignments(
             loc.operationsAssignments ?? {},
             loc.dockDoorEnabledBySpaceKey ?? {}
@@ -2094,7 +2122,10 @@ function App() {
         setLots(nextActive.lots ?? []);
         setViewport(nextActive.viewport);
         setSavedViews(nextActive.savedViews ?? []);
+        setDefaultViewBounds(nextActive.defaultViewBounds ?? null);
         setSelectedViewName('Default View');
+        setSelectedViewId(null);
+        setSelectedViewBaseline(null);
         setOperationsAssignments(
           nextMode === 'operations'
             ? Object.keys(nextActive.operationsAssignments ?? {}).length > 0
@@ -2147,7 +2178,10 @@ function App() {
         setLots(nextLots);
         setViewport(doc.viewport ?? { scale: 1, x: 0, y: 0 });
         setSavedViews(Array.isArray(doc.savedViews) ? doc.savedViews : []);
+        setDefaultViewBounds(doc.defaultViewBounds ?? null);
         setSelectedViewName('Default View');
+        setSelectedViewId(null);
+        setSelectedViewBaseline(null);
         idRef.current = typeof doc.idCounter === 'number' ? doc.idCounter : 1;
       }
 
@@ -2213,6 +2247,7 @@ function App() {
     lots,
     viewport,
     savedViews,
+    defaultViewBounds,
     idCounter: idRef.current,
   });
 
@@ -2231,7 +2266,10 @@ function App() {
     setLots(snapshot.lots ?? []);
     setViewport(snapshot.viewport);
     setSavedViews(snapshot.savedViews ?? []);
+    setDefaultViewBounds(snapshot.defaultViewBounds ?? null);
     setSelectedViewName('Default View');
+    setSelectedViewId(null);
+    setSelectedViewBaseline(null);
     setOperationsAssignments(
       applyDockDoorBindingsToAssignments(snapshot.operationsAssignments, snapshot.dockDoorEnabledBySpaceKey ?? {})
     );
@@ -2304,6 +2342,7 @@ function App() {
     lots,
     viewport,
     savedViews,
+    defaultViewBounds,
     operationsAssignments,
   ]);
 
@@ -2365,7 +2404,10 @@ function App() {
     setOperationsAssignments({});
     setViewport({ scale: 1, x: 0, y: 0 });
     setSavedViews([]);
+    setDefaultViewBounds(null);
     setSelectedViewName('Default View');
+    setSelectedViewId(null);
+    setSelectedViewBaseline(null);
     setViewMenuOpen(false);
   };
 
@@ -3020,31 +3062,46 @@ function App() {
   // Recall a saved view by fitting its stored world region into the current
   // container (contain-fit + centered), so everything in the view is visible no
   // matter how the map area has been resized since the view was saved.
-  const recallView = (view: SavedView) => {
+  // Contain-fit a world region into the current container (centered, clamped).
+  const computeViewportForBounds = (bounds: SavedView['bounds']): CanvasViewport | null => {
     const m = getCanvasMetricsNow();
-    const targetWidth = view.bounds.maxX - view.bounds.minX;
-    const targetHeight = view.bounds.maxY - view.bounds.minY;
+    const targetWidth = bounds.maxX - bounds.minX;
+    const targetHeight = bounds.maxY - bounds.minY;
     if (m.width <= 0 || m.height <= 0 || targetWidth <= 0 || targetHeight <= 0) {
-      return;
+      return null;
     }
 
     const fitScale = Math.min(m.width / targetWidth, m.height / targetHeight);
     const scale = Math.max(0.35, Math.min(fitScale, 2.5));
-    const centerX = (view.bounds.minX + view.bounds.maxX) / 2;
-    const centerY = (view.bounds.minY + view.bounds.maxY) / 2;
-
-    setViewport({
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    return {
       scale,
       x: m.width / 2 - m.paddingLeft - centerX * scale,
       y: m.height / 2 - m.paddingTop - centerY * scale,
-    });
+    };
+  };
+
+  const recallView = (view: SavedView) => {
+    const nextViewport = computeViewportForBounds(view.bounds);
+    if (!nextViewport) {
+      return;
+    }
+    setViewport(nextViewport);
     setSelectedViewName(view.name);
+    setSelectedViewId(view.id);
+    setSelectedViewBaseline(nextViewport);
     setViewMenuOpen(false);
   };
 
   const recallDefaultView = () => {
-    setViewport({ scale: 1, x: 0, y: 0 });
+    const nextViewport =
+      (defaultViewBounds ? computeViewportForBounds(defaultViewBounds) : null) ??
+      { scale: 1, x: 0, y: 0 };
+    setViewport(nextViewport);
     setSelectedViewName('Default View');
+    setSelectedViewId('default');
+    setSelectedViewBaseline(nextViewport);
     setViewMenuOpen(false);
   };
 
@@ -3094,6 +3151,8 @@ function App() {
 
     setSavedViews((current) => [...current, view]);
     setSelectedViewName(name);
+    setSelectedViewId(view.id);
+    setSelectedViewBaseline({ ...viewport });
     setAddViewModalOpen(false);
     setNewViewName('');
   };
@@ -3101,10 +3160,44 @@ function App() {
   const handleDeleteView = (id: string) => {
     const removed = savedViews.find((view) => view.id === id);
     setSavedViews((current) => current.filter((view) => view.id !== id));
-    if (removed && removed.name === selectedViewName) {
-      setSelectedViewName('Default View');
+    if (selectedViewId === id) {
+      setSelectedViewId(null);
+      setSelectedViewBaseline(null);
+      if (removed && removed.name === selectedViewName) {
+        setSelectedViewName('Default View');
+      }
     }
   };
+
+  // Overwrite a saved view's framing with the current pan/zoom. Resetting the
+  // baseline to the current viewport clears the "drifted" state, hiding the
+  // update affordance until the user pans/zooms again.
+  const handleUpdateSavedView = (id: string) => {
+    const bounds = getVisibleWorldBounds();
+    if (!bounds) {
+      return;
+    }
+    const nextBounds = { minX: bounds.minX, minY: bounds.minY, maxX: bounds.maxX, maxY: bounds.maxY };
+    setSavedViews((current) => current.map((view) => (view.id === id ? { ...view, bounds: nextBounds } : view)));
+    setSelectedViewBaseline({ ...viewport });
+  };
+
+  const handleUpdateDefaultView = () => {
+    const bounds = getVisibleWorldBounds();
+    if (!bounds) {
+      return;
+    }
+    setDefaultViewBounds({ minX: bounds.minX, minY: bounds.minY, maxX: bounds.maxX, maxY: bounds.maxY });
+    setSelectedViewBaseline({ ...viewport });
+  };
+
+  // The live viewport has moved away from the selected view's saved framing, so
+  // the user can update that view to the current position.
+  const isSelectedViewDrifted =
+    selectedViewBaseline !== null &&
+    (Math.abs(viewport.scale - selectedViewBaseline.scale) > 0.001 ||
+      Math.abs(viewport.x - selectedViewBaseline.x) > 0.5 ||
+      Math.abs(viewport.y - selectedViewBaseline.y) > 0.5);
 
   // True when a mousedown landed on empty canvas (the dropzone/world/placeholder)
   // rather than a building, row, label, or other draggable element.
@@ -6926,6 +7019,17 @@ function App() {
                         >
                           {view.name}
                         </button>
+                        {selectedViewId === view.id && isSelectedViewDrifted ? (
+                          <button
+                            className="canvas-views__menu-update"
+                            onClick={() => handleUpdateSavedView(view.id)}
+                            type="button"
+                            aria-label={`Update ${view.name} to current position`}
+                            title={`Update ${view.name} to current position`}
+                          >
+                            <UpdateViewIcon />
+                          </button>
+                        ) : null}
                         <button
                           className="canvas-views__menu-delete"
                           onClick={() => handleDeleteView(view.id)}
@@ -6946,6 +7050,17 @@ function App() {
                       >
                         Default View
                       </button>
+                      {selectedViewId === 'default' && isSelectedViewDrifted ? (
+                        <button
+                          className="canvas-views__menu-update"
+                          onClick={handleUpdateDefaultView}
+                          type="button"
+                          aria-label="Update Default View to current position"
+                          title="Update Default View to current position"
+                        >
+                          <UpdateViewIcon />
+                        </button>
+                      ) : null}
                     </div>
                     <div className="canvas-views__menu-item">
                       <button

@@ -738,7 +738,28 @@
   color: #c0392b;
 }
 
-.canvas-views__trash-svg {
+.canvas-views__menu-update {
+  appearance: none;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #406174;
+  cursor: pointer;
+}
+
+.canvas-views__menu-update:hover {
+  background: #e3f3fb;
+  color: #009cde;
+}
+
+.canvas-views__trash-svg,
+.canvas-views__update-svg {
   width: 18px;
   height: 18px;
   display: block;
